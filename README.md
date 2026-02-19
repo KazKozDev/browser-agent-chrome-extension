@@ -1,8 +1,17 @@
+<p align="center">
+  <img src="icons/icon128.png" alt="Browser Agent icon" width="160" />
+</p>
+
 # Browser Agent (Beta) — Chrome Extension
+
+[![Release](https://img.shields.io/github/v/release/KazKozDev/browser-agent-chrome-extension?label=release)](https://github.com/KazKozDev/browser-agent-chrome-extension/releases)
+[![Status](https://img.shields.io/badge/status-Public%20Beta-orange)](https://github.com/KazKozDev/browser-agent-chrome-extension/releases/tag/v1.0.0)
+[![Chrome](https://img.shields.io/badge/chrome-MV3-4285F4?logo=googlechrome&logoColor=white)](https://developer.chrome.com/docs/extensions/develop/migrate/what-is-mv3)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 Public Beta.
 
-AI-powered browser automation inside Chrome Side Panel: navigate sites, interact with page elements, and extract data using natural-language goals.
+A Claude-like browser agent extension for Chrome, focused on cost-efficient automation.
 
 ## What It Does
 
@@ -87,6 +96,24 @@ AI-powered browser automation inside Chrome Side Panel: navigate sites, interact
 Notes:
 - Provider selection is primary-only (automatic fallback is disabled).
 - Default primary provider: `groq`.
+
+## Download and Local Installation
+
+### Option A: Download ZIP (No Git)
+1. Open `https://github.com/KazKozDev/browser-agent-chrome-extension`.
+2. Click `Code` -> `Download ZIP`.
+3. Extract the ZIP archive.
+4. Open `chrome://extensions/`.
+5. Enable `Developer mode`.
+6. Click `Load unpacked`.
+7. Select the extracted folder that contains `manifest.json`.
+
+### Option B: Clone with Git
+1. Run: `git clone https://github.com/KazKozDev/browser-agent-chrome-extension.git`
+2. Open `chrome://extensions/`.
+3. Enable `Developer mode`.
+4. Click `Load unpacked`.
+5. Select the cloned folder.
 
 ## Install (Developer Mode)
 
