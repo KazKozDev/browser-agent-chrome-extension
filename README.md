@@ -101,7 +101,7 @@ Notes:
 
 ### Option A: Download ZIP (No Git)
 1. Open `https://github.com/KazKozDev/browser-agent-chrome-extension`.
-2. Click `Code` -> `Download ZIP`.
+2. Click `Code` -> `Download ZIP` (GitHub generates this archive automatically; no separate ZIP upload is required).
 3. Extract the ZIP archive.
 4. Open `chrome://extensions/`.
 5. Enable `Developer mode`.
@@ -182,6 +182,14 @@ Declared permissions currently used:
 
 - Email: `kazkozdev@gmail.com`
 - Issues: `https://github.com/KazKozDev/browser-agent-chrome-extension/issues`
+
+---
+
+If you like this project, please give it a star ⭐
+
+For questions, feedback, or support, reach out to:
+
+[Artem KK](https://www.linkedin.com/in/kazkozdev/)
 
 ## Project Structure
 
