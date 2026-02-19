@@ -16,7 +16,7 @@ A Claude-like browser agent extension for Chrome, focused on cost-efficient auto
 ## Screenshot
 
 **Query (for screenshot):**  
-"Open Wikipedia and find the article about Albert Einstein. Show the main article on the left and the info panel on the right."
+"Open Wikipedia and find the article about Albert Einstein."
 
 ![Browser Agent screenshot](docs/images/screen.png)
 
