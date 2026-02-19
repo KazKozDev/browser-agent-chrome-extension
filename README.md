@@ -13,6 +13,10 @@ Public Beta.
 
 A Claude-like browser agent extension for Chrome, focused on cost-efficient automation.
 
+## Screenshot
+
+![Browser Agent screenshot](docs/images/screen.png)
+
 ## What It Does
 
 - Executes browser tasks step-by-step with an agent loop (`observe -> think -> act`).
