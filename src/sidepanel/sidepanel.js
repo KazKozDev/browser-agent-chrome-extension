@@ -415,6 +415,7 @@ function switchTab(viewId, btnId) {
 btnHelp.addEventListener('click', () => switchTab('chatView', 'btnHelp'));
 btnSettings.addEventListener('click', () => switchTab('settingsView', 'btnSettings'));
 btnSchedule.addEventListener('click', () => switchTab('scheduleView', 'btnSchedule'));
+btnHistory.addEventListener('click', () => switchTab('historyView', 'btnHistory'));
 
 
 async function saveTaskToHistory(goal, result) {
