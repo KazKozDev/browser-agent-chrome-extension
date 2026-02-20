@@ -9,183 +9,189 @@
 [![Chrome](https://img.shields.io/badge/chrome-MV3-4285F4?logo=googlechrome&logoColor=white)](https://developer.chrome.com/docs/extensions/develop/migrate/what-is-mv3)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-Public Beta.
-
-A Claude-like browser agent extension for Chrome, focused on cost-efficient automation.
+AI-powered browser automation for Chrome. Give it a goal — it navigates, clicks, reads pages, calls APIs, and reports back.
 
 ## Screenshot
 
-**Query (for screenshot):**  
+**Query:**  
 "Open Wikipedia and find the article about Albert Einstein."
 
 ![Browser Agent screenshot](docs/images/screen.png)
 
 *Browser Agent Result: The Albert Einstein Wikipedia page is open, with the article content on the left and the info panel on the right.*
 
-## What It Does
+## Features
 
-- Executes browser tasks step-by-step with an agent loop (`observe -> think -> act`).
-- Uses accessibility-tree reading as the primary page understanding method.
-- Supports advanced DOM and mouse interactions, keyboard shortcuts, tab/frame control, uploads, and downloads status.
-- Extracts text/data from pages (`read_page`, `get_page_text`, `find_text`, `javascript`).
-- Pauses automatically on login/CAPTCHA and waits for manual `Resume`.
+### Browsing & Navigation
+- Open any URL, navigate history, reload pages.
+- Open, close, switch and list tabs; agent tabs auto-grouped as "Browser Agent".
+- Switch between iframes; Ctrl+F text search with next/previous.
+
+### Page Interaction
+- Click, double-click, right-click, triple-click, middle-click.
+- Type text, fill forms, select dropdowns, upload files.
+- Drag & drop, coordinate clicks, scroll, hover.
+- Keyboard shortcuts, hold keys, hotkey combos.
+
+### Page Reading & Inspection
+- Accessibility tree reading with element structure.
+- Full page text extraction and natural language element search.
+- Screenshots with vision-capable providers.
+- Browser console logs (errors, warnings, info) and network request monitoring.
+- Download queue status.
+
+### External Integrations
+- `http_request` — call any REST API directly (Notion, Slack, Airtable, Google Sheets, webhooks). Runs from the extension context — no CORS restrictions.
+
+### Automation & Workflow
+- **Plan mode** — agent shows steps before executing; approve or cancel.
+- **Shortcuts** — save prompts as `/name` slash commands.
+- **Scheduled tasks** — run goals automatically every N minutes/hours via `chrome.alarms`.
+- **Background workflows** — task continues even when the side panel is closed.
+- **Contextual suggestions** — smart prompt chips based on the current site.
+- **Notifications** — desktop alerts on task completion.
+
+### Safety & Permissions
+- JavaScript filtered by security rules — no cookies, auth headers, storage access.
+- **Per-domain JS permission** — asks before running scripts on new sites.
+- **Site blocklist** — blocks navigation to sensitive domains (crypto/payment by default).
+- Login, CAPTCHA and sensitive-action detection — agent pauses for manual help.
+
+### Efficiency
+- Duplicate tool call detection — blocks repeated identical calls and suggests alternatives.
+- Result banner with metrics: steps, time, errors, duplicates.
+- Task history with performance data (steps, duration, errors).
 
 ## Architecture
 
-- `src/sidepanel/*`
-  - UI: chat, history, settings, help, provider config.
-- `src/background/service-worker.js`
-  - Orchestration, agent lifecycle, provider config, keep-alive.
-- `src/agent/agent.js`
-  - Core loop, tool execution, argument normalization, safety checks.
-- `src/content/content.js`
-  - Accessibility tree extraction, DOM actions, find/find_text, monitoring.
-- `src/providers/*`
-  - OpenAI-compatible provider implementations.
-- `src/tools/tools.js`
-  - JSON-schema tool definitions exposed to the model.
+```
+src/
+├── agent/agent.js           Core loop, tool execution, safety, dedup detection
+├── background/service-worker.js  Orchestration, lifecycle, alarms, background workflows
+├── content/content.js       Accessibility tree, DOM actions, find/monitoring
+├── providers/
+│   ├── base.js              Base provider class (OpenAI-compatible)
+│   ├── fireworks.js         Fireworks (Kimi K2.5)
+│   ├── siliconflow.js       SiliconFlow (GLM-4.6V)
+│   ├── groq.js              Groq (Llama 4 Scout)
+│   ├── ollama.js            Ollama (local)
+│   └── index.js             Provider manager, tier info, config
+├── sidepanel/
+│   ├── sidepanel.html       UI: chat, settings, history, help, schedule, blocklist
+│   ├── sidepanel.js         UI logic, views, rendering, shortcuts
+│   └── icons.css            SVG icon sprites (Lucide-style)
+└── tools/tools.js           JSON-schema tool definitions for the model
+```
 
-## Tools (Current)
+## Tools
 
-| Tool | What it does |
+| Tool | Description |
 |---|---|
-| `read_page` | Reads the accessibility tree with interactive element IDs. |
-| `get_page_text` | Extracts readable text content from the current page. |
-| `find` | Finds likely interactive elements from a natural-language query. |
-| `find_text` | Searches plain text on the page (Ctrl+F style). |
-| `find_text_next` | Moves to the next result from the current text search. |
-| `find_text_prev` | Moves to the previous result from the current text search. |
-| `navigate` | Opens a target URL in the current tab. |
-| `back` | Goes back in current tab history. |
-| `forward` | Goes forward in current tab history. |
-| `reload` | Reloads the current tab. |
-| `click` | Clicks an element by agent ID. |
-| `double_click` | Double-clicks an element by agent ID. |
-| `right_click` | Right-clicks an element by agent ID. |
-| `middle_click` | Middle-clicks an element by agent ID. |
-| `triple_click` | Triple-clicks an element by agent ID. |
-| `drag_drop` | Drags one element and drops it on another by IDs. |
-| `type` | Types text into an input or editable field. |
-| `scroll` | Scrolls the page up or down. |
-| `hover` | Moves pointer over an element to trigger hover states. |
-| `select` | Selects an option in a `<select>` element. |
-| `form_input` | Sets form values directly (including checkbox/radio). |
-| `mouse_move` | Moves pointer to an element or viewport coordinates. |
-| `left_mouse_down` | Presses and holds left mouse button. |
-| `left_mouse_up` | Releases left mouse button. |
-| `click_at` | Clicks at viewport coordinates. |
-| `drag_at` | Performs coordinate-based drag from point A to B. |
-| `press_key` | Presses a keyboard key (for example Enter, Tab, Esc). |
-| `hold_key` | Holds/releases modifier keys (Ctrl, Shift, Alt, Meta). |
-| `press_hotkey` | Sends keyboard shortcut combinations. |
-| `javascript` | Executes filtered JS in page context for extraction/actions. |
-| `wait_for` | Waits for conditions like element, URL, text, or network idle. |
-| `read_console` | Reads recent browser console messages. |
-| `read_network` | Reads recent network requests and statuses. |
-| `switch_frame` | Switches interaction context to iframe or back to main frame. |
-| `upload_file` | Uploads synthetic files to file input controls. |
-| `download_status` | Returns current/recent browser download states. |
-| `list_tabs` | Lists tabs in the current browser window. |
-| `switch_tab` | Switches active tab by tab ID or index. |
-| `open_tab` | Opens a new tab with a URL. |
-| `close_tab` | Closes a specific tab or the current tab. |
-| `screenshot` | Captures a screenshot for visual understanding. |
-| `wait` | Sleeps for a fixed duration. |
-| `done` | Marks the task as completed. |
-| `fail` | Marks the task as failed with a reason. |
+| `read_page` | Accessibility tree with interactive element IDs |
+| `get_page_text` | Full readable text content of the page |
+| `find` | Natural-language element search |
+| `find_text` | Ctrl+F plain text search with match count |
+| `find_text_next` / `find_text_prev` | Navigate search results |
+| `navigate` | Open a URL (blocklist-checked) |
+| `back` / `forward` / `reload` | Browser history controls |
+| `click` / `double_click` / `right_click` / `middle_click` / `triple_click` | Click by element ID |
+| `type` | Type text into inputs |
+| `scroll` / `hover` / `select` / `form_input` | Page interaction |
+| `drag_drop` / `drag_at` | Drag & drop by IDs or coordinates |
+| `mouse_move` / `click_at` | Coordinate-based interaction |
+| `left_mouse_down` / `left_mouse_up` | Advanced mouse control |
+| `press_key` / `hold_key` / `press_hotkey` | Keyboard actions |
+| `javascript` | Filtered JS execution in page context |
+| `wait_for` / `wait` | Wait for conditions or fixed delay |
+| `read_console` | Browser console messages (errors, warnings, logs) |
+| `read_network` | Recent network requests and statuses |
+| `http_request` | Call any REST API (GET/POST/PUT/DELETE/PATCH) |
+| `switch_frame` | Switch to iframe or back to main |
+| `upload_file` | Upload files to file inputs |
+| `download_status` | Download queue state |
+| `list_tabs` / `switch_tab` / `open_tab` / `close_tab` | Tab management |
+| `screenshot` | Capture page screenshot (vision providers) |
+| `done` / `fail` | Mark task as completed or failed |
 
-## Providers (Current)
+## Providers
 
-| Provider | Model | Pricing | Vision | Tools | Tier |
-|---|---|---|---|---|---|
-| SiliconFlow | GLM-4.6V | $0.30 / $0.90 per 1M tokens | Yes | Yes | Recommended |
-| Groq | Llama 4 Scout | $0.11 / $0.34 per 1M tokens | Yes | Yes | Budget |
-| Ollama | Local model (`qwen3-vl:8b` default) | Free | Yes | Yes | Free |
+| Tier | Provider | Model | Pricing (per 1M tokens) |
+|---|---|---|---|
+| Recommended | Fireworks | Kimi K2.5 | $0.60 in / $3.00 out |
+| Budget | SiliconFlow | GLM-4.6V | $0.30 in / $0.90 out |
+| Budget | Groq | Llama 4 Scout | $0.11 in / $0.34 out |
+| Free | Ollama | Local model | Free |
 
-Notes:
-- Provider selection is primary-only (automatic fallback is disabled).
-- Default primary provider: `groq`.
+All providers support vision and tool calling. Provider selection is primary-only (no automatic fallback).
 
-## Download and Local Installation
+## Install
 
-### Option A: Download ZIP (No Git)
-1. Open `https://github.com/KazKozDev/browser-agent-chrome-extension`.
-2. Click `Code` -> `Download ZIP` (GitHub generates this archive automatically; no separate ZIP upload is required).
-3. Extract the ZIP archive.
-4. Open `chrome://extensions/`.
-5. Enable `Developer mode`.
-6. Click `Load unpacked`.
-7. Select the extracted folder that contains `manifest.json`.
+### Option A: Download ZIP
+1. Go to `https://github.com/KazKozDev/browser-agent-chrome-extension`.
+2. Click **Code** > **Download ZIP**, extract.
+3. Open `chrome://extensions/`, enable **Developer mode**.
+4. Click **Load unpacked**, select the folder with `manifest.json`.
 
-### Option B: Clone with Git
-1. Run: `git clone https://github.com/KazKozDev/browser-agent-chrome-extension.git`
-2. Open `chrome://extensions/`.
-3. Enable `Developer mode`.
-4. Click `Load unpacked`.
-5. Select the cloned folder.
+### Option B: Clone
+```bash
+git clone https://github.com/KazKozDev/browser-agent-chrome-extension.git
+```
+Then load unpacked in `chrome://extensions/`.
 
-## Install (Developer Mode)
-
-1. Open `chrome://extensions/`.
-2. Enable `Developer mode`.
-3. Click `Load unpacked`.
-4. Select this repository folder (the folder that contains `manifest.json`).
-5. Open extension side panel.
-6. In Settings, configure provider API key/model.
-7. Enter a goal and run.
+### First Run
+1. Open the extension side panel.
+2. Go to Settings, pick a tier, enter API key.
+3. Click **Test** to verify connection.
+4. Enter a goal and run.
 
 ## Provider Setup
 
-### SiliconFlow (Recommended)
-1. Create API key at `https://cloud.siliconflow.com/`.
-2. In Settings, choose the Recommended tier.
-3. Set API key and keep model `zai-org/GLM-4.6V`.
-4. Click `Test Connection`.
+### Fireworks (Recommended)
+1. Get API key at `https://fireworks.ai/`.
+2. Select the Recommended tier in Settings.
+3. Model: `accounts/fireworks/models/kimi-k2p5`.
+
+### SiliconFlow (Budget)
+1. Get API key at `https://cloud.siliconflow.com/`.
+2. Select the Budget tier. Model: `zai-org/GLM-4.6V`.
 
 ### Groq (Budget)
-1. Create API key at `https://console.groq.com/`.
-2. In Settings, choose the Budget tier.
-3. Set API key and keep model `meta-llama/llama-4-scout-17b-16e-instruct`.
-4. Click `Test Connection`.
+1. Get API key at `https://console.groq.com/`.
+2. Select the Budget tier. Model: `meta-llama/llama-4-maverick-17b-128e-instruct`.
 
 ### Ollama (Free)
-1. Install Ollama locally.
-2. Start server: `ollama serve`.
-3. Pull model: `ollama pull qwen3-vl:8b`.
-4. In Settings, choose the Free tier and test connection.
+1. Install Ollama, run `ollama serve`.
+2. Pull a model: `ollama pull qwen3-vl:8b`.
+3. Select the Free tier in Settings.
 
-## Manifest / Permissions
+## Permissions
 
-Manifest V3 (`manifest.json`) with:
-- `name`: `Browser Agent (Beta)`
-- `version`: `1.0.0`
-- `description`: starts with `Public Beta`
+Manifest V3 permissions:
+- `activeTab`, `scripting`, `tabs`, `downloads`, `sidePanel`, `storage`, `unlimitedStorage`, `alarms`, `notifications`, `tabGroups`
+- Host: `<all_urls>`
 
-Declared permissions currently used:
-- `activeTab`, `scripting`, `tabs`, `downloads`, `sidePanel`, `storage`, `alarms`
-- host access: `http://*/*`, `https://*/*`
+## Security
 
-## Security and Safety
-
-- Sensitive actions use confirmation logic.
-- JavaScript tool blocks high-risk storage/cookie patterns.
-- Console/network collection is on-demand.
-- Login/CAPTCHA flow uses manual pause/resume.
+- JavaScript tool blocks `document.cookie`, `localStorage`, `sessionStorage`, `indexedDB`, and `Authorization` header access.
+- Per-domain JS approval — agent asks before executing scripts on a new domain.
+- Site blocklist — crypto/payment sites blocked by default; custom domains via Blocklist view.
+- Sensitive action confirmation — `confirm: true` required for submit/delete/pay actions.
+- Login/CAPTCHA detection — agent pauses and waits for manual completion.
+- Console and network data collected only on demand.
 
 ## Troubleshooting
 
-- `429 rate_limit_exceeded`: reduce retries, shorten prompts/context, or wait for TPM/RPM reset.
-- `400 tool_use_failed`: usually invalid tool arguments; re-run with correct parameter types.
-- "Connected" then runtime error: provider health check passed, but chat/tool call failed due to payload or limits.
-- Agent loops too long / max steps: use a more specific goal and ask for fewer actions per run.
-- Login/CAPTCHA pages: complete verification manually, then click `Resume`.
+- **429 rate limit**: wait for TPM/RPM reset or shorten prompts.
+- **400 tool_use_failed**: invalid tool arguments; retry with correct types.
+- **Agent loops too long**: use a more specific goal; check history metrics for inefficiency.
+- **Login/CAPTCHA**: complete manually, then click Resume.
 
 ## Known Limitations
 
-- Some cross-origin iframes cannot be fully controlled due to browser security.
+- Some cross-origin iframes cannot be controlled due to browser security.
 - Anti-bot protected pages may block automated flows.
 - Dynamic pages can invalidate cached element IDs after navigation/re-render.
-- Local/Ollama performance depends on machine resources and model size.
+- Ollama performance depends on local hardware and model size.
 
 ## Support
 
@@ -194,37 +200,6 @@ Declared permissions currently used:
 
 ---
 
-If you like this project, please give it a star ⭐
-
-For questions, feedback, or support, reach out to:
+If you like this project, please give it a star!
 
 [Artem KK](https://www.linkedin.com/in/kazkozdev/)
-
-## Project Structure
-
-```
-.
-├── manifest.json
-├── icons/
-├── _locales/
-├── src/
-│   ├── agent/
-│   │   └── agent.js
-│   ├── background/
-│   │   └── service-worker.js
-│   ├── content/
-│   │   └── content.js
-│   ├── providers/
-│   │   ├── base.js
-│   │   ├── groq.js
-│   │   ├── ollama.js
-│   │   ├── siliconflow.js
-│   │   └── index.js
-│   ├── sidepanel/
-│   │   ├── sidepanel.html
-│   │   ├── sidepanel.js
-│   │   └── icons.css
-│   └── tools/
-│       └── tools.js
-└── README.md
-```

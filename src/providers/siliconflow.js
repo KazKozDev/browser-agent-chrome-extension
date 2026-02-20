@@ -18,7 +18,68 @@ export class SiliconFlowProvider extends BaseLLMProvider {
         this.supportsVision = true;
         this.supportsTools = true;
         this.lastError = '';
-        this._alternateHostError = null;
+        this._preferredBaseUrl = null;
+    }
+
+    _getPrimaryBaseUrl() {
+        return this._preferredBaseUrl || this.baseUrl;
+    }
+
+    async _requestAtBaseUrl(baseUrl, endpoint, body, attempt = 0) {
+        const url = `${baseUrl}${endpoint}`;
+        const headers = { 'Content-Type': 'application/json' };
+        if (this.apiKey) headers.Authorization = `Bearer ${this.apiKey}`;
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), this.requestTimeoutMs);
+        try {
+            const resp = await fetch(url, {
+                method: 'POST',
+                headers,
+                body: JSON.stringify(body),
+                signal: controller.signal,
+            });
+
+            if (!resp.ok) {
+                const errText = await resp.text();
+                if (resp.status === 429 && attempt < 4) {
+                    const waitMs = this._extractRetryDelayMs(resp, errText, attempt);
+                    await new Promise((resolve) => setTimeout(resolve, waitMs));
+                    return this._requestAtBaseUrl(baseUrl, endpoint, body, attempt + 1);
+                }
+                const err = new Error(`${this.name} API error ${resp.status}: ${errText}`);
+                err.status = resp.status;
+                err.code = resp.status === 429 ? 'RATE_LIMIT_EXCEEDED' : 'PROVIDER_HTTP_ERROR';
+                try {
+                    const parsed = JSON.parse(errText);
+                    const providerErr = parsed?.error;
+                    if (providerErr && typeof providerErr === 'object') {
+                        err.providerError = providerErr;
+                        if (providerErr.code === 'tool_use_failed') {
+                            err.code = 'TOOL_USE_FAILED';
+                        } else if (typeof providerErr.code === 'string') {
+                            err.providerCode = providerErr.code;
+                        }
+                    }
+                } catch (parseErr) {
+                    void parseErr;
+                    // Non-JSON error body
+                }
+                throw err;
+            }
+            return await resp.json();
+        } catch (err) {
+            if (err.name === 'AbortError') {
+                const timeoutErr = new Error(
+                    `${this.name} API request timed out after ${this.requestTimeoutMs}ms`,
+                );
+                timeoutErr.code = 'REQUEST_TIMEOUT';
+                throw timeoutErr;
+            }
+            throw err;
+        } finally {
+            clearTimeout(timeoutId);
+        }
     }
 
     async chat(messages, tools = [], options = {}) {
@@ -36,15 +97,21 @@ export class SiliconFlowProvider extends BaseLLMProvider {
         }
 
         let response;
+        const primaryBaseUrl = this._getPrimaryBaseUrl();
         try {
-            response = await this._request('/chat/completions', body);
+            response = await this._requestAtBaseUrl(primaryBaseUrl, '/chat/completions', body);
         } catch (err) {
             this.lastError = this._formatError(err);
-            const switched = await this._retryWithAlternateHost('/chat/completions', body, err);
-            if (switched) {
-                response = switched;
-            } else {
-                const retryErr = this._alternateHostError || err;
+            const altBaseUrl = this._getAlternateBaseUrl(primaryBaseUrl);
+            if (!altBaseUrl || !this._shouldTryAlternateHost(err)) {
+                const recovered = this.recoverToolUseFailed(err);
+                if (recovered) return recovered;
+                throw err;
+            }
+            try {
+                response = await this._requestAtBaseUrl(altBaseUrl, '/chat/completions', body);
+                this._preferredBaseUrl = altBaseUrl;
+            } catch (retryErr) {
                 const recovered = this.recoverToolUseFailed(retryErr) || this.recoverToolUseFailed(err);
                 if (recovered) return recovered;
                 throw retryErr;
@@ -86,7 +153,7 @@ export class SiliconFlowProvider extends BaseLLMProvider {
         const calls = [];
         for (const chunk of chunks) {
             const parsed = this._parseReasoningToolChunk(chunk);
-            if (!parsed || typeof parsed.name !== 'string') continue;
+            if (!parsed || !this._isValidRecoveredToolCall(parsed.name, parsed.arguments)) continue;
             calls.push({
                 id: `sf_tc_${Date.now()}_${calls.length}`,
                 name: parsed.name,
@@ -101,7 +168,8 @@ export class SiliconFlowProvider extends BaseLLMProvider {
         let obj;
         try {
             obj = JSON.parse(chunk);
-        } catch {
+        } catch (err) {
+            void err;
             return null;
         }
 
@@ -112,7 +180,8 @@ export class SiliconFlowProvider extends BaseLLMProvider {
         if (typeof args === 'string') {
             try {
                 args = JSON.parse(args);
-            } catch {
+            } catch (err) {
+                void err;
                 args = {};
             }
         }
@@ -122,38 +191,20 @@ export class SiliconFlowProvider extends BaseLLMProvider {
         return { name, arguments: args };
     }
 
-    async _retryWithAlternateHost(endpoint, body, originalError) {
-        this._alternateHostError = null;
-        if (!this._shouldTryAlternateHost(originalError)) return null;
-        const altBaseUrl = this._getAlternateBaseUrl(this.baseUrl);
-        if (!altBaseUrl) return null;
-
-        const prevBaseUrl = this.baseUrl;
-        this.baseUrl = altBaseUrl;
-        try {
-            const response = await this._request(endpoint, body);
-            return response;
-        } catch (err) {
-            this.baseUrl = prevBaseUrl;
-            this._alternateHostError = err;
-            this.lastError = this._formatError(err);
-            return null;
-        }
-    }
-
     async isAvailable() {
         if (!this.apiKey) {
             this.lastError = 'API key is missing';
             return false;
         }
 
-        const primary = await this._checkModels(this.baseUrl);
+        const primaryBaseUrl = this._getPrimaryBaseUrl();
+        const primary = await this._checkModels(primaryBaseUrl);
         if (primary.ok) {
             this.lastError = '';
             return true;
         }
 
-        const altBaseUrl = this._getAlternateBaseUrl(this.baseUrl);
+        const altBaseUrl = this._getAlternateBaseUrl(primaryBaseUrl);
         if (!altBaseUrl) {
             this.lastError = primary.error;
             return false;
@@ -161,8 +212,7 @@ export class SiliconFlowProvider extends BaseLLMProvider {
 
         const secondary = await this._checkModels(altBaseUrl);
         if (secondary.ok) {
-            // Persist working host in-memory to avoid repeated failures.
-            this.baseUrl = altBaseUrl;
+            this._preferredBaseUrl = altBaseUrl;
             this.lastError = '';
             return true;
         }

@@ -1,3 +1,4 @@
+import { FireworksProvider } from './fireworks.js';
 import { GroqProvider } from './groq.js';
 import { OllamaProvider } from './ollama.js';
 import { SiliconFlowProvider } from './siliconflow.js';
@@ -12,15 +13,21 @@ import { SiliconFlowProvider } from './siliconflow.js';
  */
 
 const PROVIDER_CLASSES = {
+  fireworks: FireworksProvider,
   siliconflow: SiliconFlowProvider,
   groq: GroqProvider,
   ollama: OllamaProvider,
 };
 
 const DEFAULT_CONFIG = {
-  primary: 'groq',
+  primary: 'fireworks',
   fallbackOrder: [],
   providers: {
+    fireworks: {
+      apiKey: '',
+      baseUrl: 'https://api.fireworks.ai/inference/v1',
+      model: 'accounts/fireworks/models/kimi-k2p5',
+    },
     siliconflow: {
       apiKey: '',
       baseUrl: 'https://api.siliconflow.com/v1',
@@ -29,7 +36,7 @@ const DEFAULT_CONFIG = {
     groq: {
       apiKey: '',
       baseUrl: 'https://api.groq.com/openai/v1',
-      model: 'meta-llama/llama-4-scout-17b-16e-instruct',
+      model: 'meta-llama/llama-4-maverick-17b-128e-instruct',
     },
     ollama: {
       baseUrl: 'http://localhost:11434/v1',
@@ -37,6 +44,23 @@ const DEFAULT_CONFIG = {
     },
   },
 };
+
+const WARN_THROTTLE_MS = 10000;
+const warnTimestamps = new Map();
+
+function debugWarn(context, err) {
+  const key = String(context || 'unknown');
+  const now = Date.now();
+  const last = warnTimestamps.get(key) || 0;
+  if (now - last < WARN_THROTTLE_MS) return;
+  warnTimestamps.set(key, now);
+  const message = err?.message || String(err || 'unknown error');
+  console.warn(`[ProviderManager] ${key}: ${message}`);
+}
+
+function shouldLogStorageWarning() {
+  return typeof chrome !== 'undefined' && !!chrome?.storage?.local;
+}
 
 export class ProviderManager {
   constructor() {
@@ -55,8 +79,10 @@ export class ProviderManager {
       if (stored.providerConfig) {
         this.config = { ...DEFAULT_CONFIG, ...stored.providerConfig };
       }
-    } catch {
-      // Running outside extension context (tests)
+    } catch (err) {
+      if (shouldLogStorageWarning()) {
+        debugWarn('init.loadProviderConfig', err);
+      }
     }
     this._sanitizeConfig();
     this._buildProviders();
@@ -146,8 +172,10 @@ export class ProviderManager {
     this.statusCache = { ts: 0, data: null };
     try {
       await chrome.storage.local.set({ providerConfig: this.config });
-    } catch {
-      // Outside extension context
+    } catch (err) {
+      if (shouldLogStorageWarning()) {
+        debugWarn('updateConfig.persistProviderConfig', err);
+      }
     }
   }
 
@@ -169,7 +197,9 @@ export class ProviderManager {
       if (hasKey) {
         try {
           available = await provider.isAvailable();
-        } catch { /* noop */ }
+        } catch (err) {
+          debugWarn(`getStatus.isAvailable.${name}`, err);
+        }
       }
       status[name] = {
         configured: hasKey,
@@ -187,31 +217,37 @@ export class ProviderManager {
    */
   static getProviderInfo() {
     return {
-      siliconflow: {
-        label: 'GLM-4.6V',
-        pricing: '$0.30 / $0.90 per 1M tokens',
+      fireworks: {
+        label: 'Kimi K2.5',
+        pricing: '$0.60 in / $3.00 out',
+        costPerMTokenIn: 0.60,
+        costPerMTokenOut: 3.00,
         vision: true,
         tools: true,
-        signupUrl: 'https://cloud.siliconflow.com/',
-        note: 'SOTA visual model with native tool calls. 131K context.',
+        signupUrl: 'https://fireworks.ai/account/api-keys',
+        note: 'Flagship agentic model with thinking mode. 262K context.',
         tier: 'recommended',
       },
       groq: {
-        label: 'Llama 4 Scout',
-        pricing: '$0.11 / $0.34 per 1M tokens',
+        label: 'Llama 4 Maverick',
+        pricing: '$0.20 in / $0.60 out',
+        costPerMTokenIn: 0.20,
+        costPerMTokenOut: 0.60,
         vision: true,
         tools: true,
-        signupUrl: 'https://console.groq.com/',
-        note: 'Budget option. Vision + tools, fast inference.',
+        signupUrl: 'https://console.groq.com/keys',
+        note: 'Fast Groq inference. 17Bx128E MoE, 128K context.',
         tier: 'budget',
       },
       ollama: {
         label: 'Ollama',
         pricing: 'Free',
+        costPerMTokenIn: 0,
+        costPerMTokenOut: 0,
         vision: true,
         tools: true,
         signupUrl: 'https://ollama.ai/',
-        note: 'Runs locally. Needs ollama serve + model pull.',
+        note: 'Fully private, no API key needed. Requires Ollama serve + model pull.',
         tier: 'free',
       },
     };

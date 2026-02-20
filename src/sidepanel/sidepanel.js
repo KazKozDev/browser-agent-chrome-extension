@@ -120,12 +120,12 @@ function adjustGoalInputHeight() {
 
 sendBtn.addEventListener('click', () => {
   if (isPaused) {
-    port.postMessage({ type: 'resumeTask' });
+    sendMsg({ type: 'resumeTask' });
     return;
   }
 
   if (isRunning) {
-    port.postMessage({ type: 'stopTask' });
+    sendMsg({ type: 'stopTask' });
     return;
   }
 
@@ -134,10 +134,18 @@ sendBtn.addEventListener('click', () => {
 
   currentGoal = goal;
 
-  // Clear previous steps and restore from collapsed state
+  // Clear previous steps and hide capabilities
   stepsContainer.innerHTML = '';
   stepsContainer.classList.remove('finished');
-  emptyState.style.display = 'none';
+  stepsContainer.style.display = 'flex'; // show steps
+  
+  const emptyStateEl = document.getElementById('emptyState');
+  if (emptyStateEl) emptyStateEl.style.display = 'none'; // hide accordions
+  const capabilitiesHeader = document.getElementById('capabilitiesHeader');
+  if (capabilitiesHeader) capabilitiesHeader.style.display = 'none'; // hide header
+  const suggestionsContainer = document.getElementById('suggestionsContainer');
+  if (suggestionsContainer) suggestionsContainer.style.display = 'none';
+
   resultBanner.style.display = 'none';
   resultBanner.className = 'result-banner';
   resultBanner.textContent = '';
@@ -147,12 +155,12 @@ sendBtn.addEventListener('click', () => {
   goalEl.className = 'step thought';
   const goalHeader = document.createElement('div');
   goalHeader.className = 'step-header';
-  goalHeader.innerHTML = `${icon('target')} Goal`;
+  goalHeader.innerHTML = `<span class="i i-target"></span> Goal`;
   goalEl.appendChild(goalHeader);
   goalEl.appendChild(document.createTextNode(goal));
   stepsContainer.appendChild(goalEl);
 
-  port.postMessage({ type: 'startTask', goal });
+  sendMsg({ type: 'startTask', goal, planMode });
   goalInput.value = '';
   adjustGoalInputHeight();
 });

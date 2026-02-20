@@ -1,5 +1,18 @@
 import { BaseLLMProvider } from './base.js';
 
+const WARN_THROTTLE_MS = 10000;
+const warnTimestamps = new Map();
+
+function debugWarn(context, err) {
+  const key = String(context || 'unknown');
+  const now = Date.now();
+  const last = warnTimestamps.get(key) || 0;
+  if (now - last < WARN_THROTTLE_MS) return;
+  warnTimestamps.set(key, now);
+  const message = err?.message || String(err || 'unknown error');
+  console.warn(`[GroqProvider] ${key}: ${message}`);
+}
+
 /**
  * Groq Provider (OpenAI-compatible)
  *
@@ -14,10 +27,12 @@ export class GroqProvider extends BaseLLMProvider {
     super(config);
     this.name = 'groq';
     this.baseUrl = config.baseUrl || 'https://api.groq.com/openai/v1';
-    this.model = config.model || 'meta-llama/llama-4-scout-17b-16e-instruct';
+    this.model = config.model || 'meta-llama/llama-4-maverick-17b-128e-instruct';
     this.supportsVision = true;
     this.supportsTools = true;
     this.enableThinking = config.enableThinking ?? false;
+    // temperature 0.0 — determinism for agentic tasks (Meta + browser-use recommendation)
+    this.temperature = config.temperature ?? 0.0;
   }
 
   async chat(messages, tools = [], options = {}) {
@@ -72,7 +87,8 @@ export class GroqProvider extends BaseLLMProvider {
       } finally {
         clearTimeout(tid);
       }
-    } catch {
+    } catch (err) {
+      debugWarn('isAvailable.requestFailed', err);
       return false;
     }
   }

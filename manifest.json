@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Browser Agent (Beta)",
-  "version": "1.0.0",
-  "description": "Public Beta: AI-powered browser automation — navigate, click, fill forms with natural language",
+  "name": "Browser Agent",
+  "version": "1.0.1",
+  "description": "Tell your browser what to do — it does the rest. Public Beta.",
   "permissions": [
     "activeTab",
     "scripting",
@@ -10,7 +10,10 @@
     "downloads",
     "sidePanel",
     "storage",
-    "alarms"
+    "unlimitedStorage",
+    "alarms",
+    "notifications",
+    "tabGroups"
   ],
   "host_permissions": [
     "http://*/*",

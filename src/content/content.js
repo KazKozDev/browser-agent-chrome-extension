@@ -78,13 +78,6 @@
   let activeDocument = document;
   let activeFrameLabel = 'main';
   const heldModifiers = new Set();
-  const pointerState = {
-    isDown: false,
-    doc: null,
-    x: null,
-    y: null,
-    target: null,
-  };
 
   function getActiveDocument() {
     return activeDocument || document;
@@ -94,11 +87,6 @@
     activeDocument = document;
     activeFrameLabel = 'main';
     heldModifiers.clear();
-    pointerState.isDown = false;
-    pointerState.doc = null;
-    pointerState.x = null;
-    pointerState.y = null;
-    pointerState.target = null;
     clearFindTextState();
   }
 
@@ -137,19 +125,6 @@
       altKey: set.has('Alt'),
       metaKey: set.has('Meta'),
     };
-  }
-
-  function dispatchModifierKey(doc, key, down) {
-    const target = doc.activeElement || doc.body;
-    const flags = modifierFlags();
-    const type = down ? 'keydown' : 'keyup';
-    const event = new KeyboardEvent(type, {
-      key,
-      code: key,
-      bubbles: true,
-      ...flags,
-    });
-    target.dispatchEvent(event);
   }
 
   function clearFindTextState() {
@@ -231,12 +206,13 @@
     const activeView = activeDoc.defaultView || window;
     const maxDepth = options.maxDepth || 15;
     const maxNodes = options.maxNodes || 500;
+    const viewportOnly = options.viewportOnly === true;
     let nodeCount = 0;
-    // FIX #3: Continue from global seed — no ID conflicts with findByDescription
+    // Continue from global seed to keep IDs unique for findByDescription
     const startSeed = findAgentSeed;
     let interactiveId = findAgentSeed;
 
-    // FIX #1: Use textContent (no layout reflow) + limit first-child traversal
+    // Use textContent (no layout reflow) and cap traversal output size
     function getAccessibleName(el) {
       const label = el.getAttribute('aria-label')
         || el.getAttribute('alt')
@@ -251,7 +227,7 @@
       return raw.slice(0, 120).replace(/\s+/g, ' ').trim().slice(0, 80);
     }
 
-    // FIX #2: Defer expensive getComputedStyle to last check
+    // Defer expensive getComputedStyle check until fast checks fail
     function isInteractive(el) {
       const tag = el.tagName.toLowerCase();
       if (['a', 'button', 'input', 'select', 'textarea', 'summary'].includes(tag)) return true;
@@ -285,6 +261,14 @@
       if (nodeCount >= maxNodes || depth > maxDepth) return null;
       if (!el || el.nodeType !== 1) return null;
       if (!isElementVisible(el)) return null;
+
+      if (viewportOnly) {
+        const rect = el.getBoundingClientRect();
+        if (rect.bottom < 0 || rect.top > (window.innerHeight || document.documentElement.clientHeight) ||
+          rect.right < 0 || rect.left > (window.innerWidth || document.documentElement.clientWidth)) {
+          return null;
+        }
+      }
 
       const tag = el.tagName.toLowerCase();
       if (['script', 'style', 'noscript', 'meta', 'link'].includes(tag)) return null;
@@ -371,10 +355,10 @@
     }
 
     const tree = traverse(activeDoc.body);
-    // FIX #3: Persist highest ID globally
+    // Persist highest ID globally for subsequent reads
     findAgentSeed = interactiveId;
 
-    // FIX #5: Include scroll position and page dimensions
+    // Include scroll position and page dimensions in output
     const docEl = activeDoc.documentElement;
     return {
       url: activeView.location.href,
@@ -448,7 +432,7 @@
     return getActiveDocument().querySelector(`[data-agent-id="${agentId}"]`);
   }
 
-  // FIX #4: Wait for element to appear (SPA / dynamic content)
+  // Wait for element to appear on dynamic pages before acting
   function waitForElement(agentId, timeoutMs = 3000) {
     return new Promise((resolve) => {
       const el = findElementById(agentId);
@@ -483,117 +467,6 @@
     el.dispatchEvent(event);
   }
 
-  function fireMouseAt(doc, type, x, y, overrides = {}) {
-    const view = doc.defaultView || window;
-    const extraModifiers = Array.isArray(overrides.modifiers) ? overrides.modifiers : [];
-    const { modifiers, ...rest } = overrides;
-    const target = doc.elementFromPoint(Math.round(x), Math.round(y)) || doc.body;
-    const event = new MouseEvent(type, {
-      bubbles: true,
-      cancelable: true,
-      view,
-      clientX: Math.round(x),
-      clientY: Math.round(y),
-      ...modifierFlags(extraModifiers),
-      ...rest,
-    });
-    target.dispatchEvent(event);
-    return target;
-  }
-
-  function centerOfElement(el) {
-    const rect = el.getBoundingClientRect();
-    return {
-      x: Math.round(rect.left + rect.width / 2),
-      y: Math.round(rect.top + rect.height / 2),
-    };
-  }
-
-  function hasNumeric(v) {
-    return Number.isFinite(Number(v));
-  }
-
-  function resolvePointerTarget(target, params = {}, requireTarget = false) {
-    if (target !== undefined && target !== null && target !== '') {
-      const el = findElementById(target);
-      if (!el) {
-        return {
-          ok: false,
-          error: makeError(ACTION_ERROR.ELEMENT_NOT_FOUND, `Element [${target}] not found`, { target }),
-        };
-      }
-      el.scrollIntoView({ block: 'center', behavior: 'instant' });
-      const point = centerOfElement(el);
-      return { ok: true, doc: el.ownerDocument || getActiveDocument(), element: el, x: point.x, y: point.y };
-    }
-
-    if (hasNumeric(params.x) && hasNumeric(params.y)) {
-      const doc = getActiveDocument();
-      const x = Number(params.x);
-      const y = Number(params.y);
-      const el = doc.elementFromPoint(Math.round(x), Math.round(y));
-      return { ok: true, doc, element: el || doc.body, x: Math.round(x), y: Math.round(y) };
-    }
-
-    if (requireTarget) {
-      return {
-        ok: false,
-        error: makeError(ACTION_ERROR.INVALID_TARGET, 'Action requires target element or x/y coordinates'),
-      };
-    }
-
-    const doc = getActiveDocument();
-    const fallback = doc.activeElement || doc.body;
-    const point = centerOfElement(fallback);
-    return { ok: true, doc, element: fallback, x: point.x, y: point.y };
-  }
-
-  function decodeBase64ToBytes(base64) {
-    const normalized = String(base64 || '').replace(/\s/g, '');
-    const binary = atob(normalized);
-    const out = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
-    return out;
-  }
-
-  function resolveFrameElement(target, params = {}) {
-    const activeDoc = getActiveDocument();
-    const frames = activeDoc.querySelectorAll('iframe, frame');
-
-    if (params.main === true || target === 'main' || target === '__main__') {
-      return { mode: 'main' };
-    }
-
-    if (params.index !== undefined) {
-      const idx = Number(params.index);
-      if (Number.isInteger(idx) && idx >= 0 && idx < frames.length) {
-        return { mode: 'frame', element: frames[idx], label: `index:${idx}` };
-      }
-    }
-
-    if (typeof target === 'number') {
-      const el = activeDoc.querySelector(`[data-agent-id="${target}"]`);
-      if (el && (el.tagName === 'IFRAME' || el.tagName === 'FRAME')) {
-        return { mode: 'frame', element: el, label: `id:${target}` };
-      }
-    }
-
-    if (typeof target === 'string' && target.trim()) {
-      const t = target.trim();
-      if (/^\d+$/.test(t)) {
-        const byId = activeDoc.querySelector(`[data-agent-id="${Number(t)}"]`);
-        if (byId && (byId.tagName === 'IFRAME' || byId.tagName === 'FRAME')) {
-          return { mode: 'frame', element: byId, label: `id:${t}` };
-        }
-      }
-      const escaped = cssEscape(t);
-      const byNameOrId = activeDoc.querySelector(`iframe[name="${escaped}"], iframe#${escaped}, frame[name="${escaped}"], frame#${escaped}`);
-      if (byNameOrId) return { mode: 'frame', element: byNameOrId, label: t };
-    }
-
-    return null;
-  }
-
   function executeAction(action) {
     if (!action || typeof action !== 'object') {
       return makeError(ACTION_ERROR.INVALID_ACTION, 'Action payload must be an object');
@@ -612,232 +485,37 @@
           );
         }
         el.scrollIntoView({ block: 'center', behavior: 'instant' });
-        fireMouse(el, 'mousedown', { button: 0, buttons: 1, detail: 1 });
-        fireMouse(el, 'mouseup', { button: 0, buttons: 0, detail: 1 });
-        fireMouse(el, 'click', { button: 0, buttons: 0, detail: 1 });
-        if (heldModifiers.size === 0) {
-          el.click();
+        const btnName = (params?.button || 'left').toLowerCase();
+        const btnCode = btnName === 'right' ? 2 : btnName === 'middle' ? 1 : 0;
+        const btnMask = btnName === 'right' ? 2 : btnName === 'middle' ? 4 : 1;
+        const count = Math.min(Math.max(Number(params?.clickCount) || 1, 1), 3);
+
+        if (btnName === 'right') {
+          // Right-click: mousedown → mouseup → contextmenu
+          fireMouse(el, 'mousedown', { button: btnCode, buttons: btnMask });
+          fireMouse(el, 'mouseup', { button: btnCode, buttons: btnMask });
+          fireMouse(el, 'contextmenu', { button: btnCode, buttons: btnMask });
+          return { success: true, description: `Right-clicked [${target}]` };
         }
-        return { success: true, description: `Clicked [${target}]` };
-      }
-
-      case 'mouse_move': {
-        const resolved = resolvePointerTarget(target, params, true);
-        if (!resolved.ok) return resolved.error;
-        const hit = fireMouseAt(resolved.doc, 'mousemove', resolved.x, resolved.y, { buttons: pointerState.isDown ? 1 : 0 });
-        fireMouseAt(resolved.doc, 'mouseover', resolved.x, resolved.y, { buttons: pointerState.isDown ? 1 : 0 });
-        pointerState.x = resolved.x;
-        pointerState.y = resolved.y;
-        pointerState.doc = resolved.doc;
-        pointerState.target = hit || resolved.element;
-        return {
-          success: true,
-          description: `Moved mouse to (${resolved.x}, ${resolved.y})`,
-          x: resolved.x,
-          y: resolved.y,
-        };
-      }
-
-      case 'middle_click': {
-        const el = findElementById(target);
-        if (!el) return makeError(ACTION_ERROR.ELEMENT_NOT_FOUND, `Element [${target}] not found`, { target });
-        el.scrollIntoView({ block: 'center', behavior: 'instant' });
-        fireMouse(el, 'mousedown', { button: 1, buttons: 4, detail: 1 });
-        fireMouse(el, 'mouseup', { button: 1, buttons: 0, detail: 1 });
-        fireMouse(el, 'auxclick', { button: 1, buttons: 0, detail: 1 });
-        return { success: true, description: `Middle-clicked [${target}]` };
-      }
-
-      case 'triple_click': {
-        const el = findElementById(target);
-        if (!el) return makeError(ACTION_ERROR.ELEMENT_NOT_FOUND, `Element [${target}] not found`, { target });
-        el.scrollIntoView({ block: 'center', behavior: 'instant' });
-        for (let i = 1; i <= 3; i++) {
+        if (btnName === 'middle') {
+          // Middle-click: mousedown → mouseup → auxclick
+          fireMouse(el, 'mousedown', { button: btnCode, buttons: btnMask, detail: 1 });
+          fireMouse(el, 'mouseup', { button: btnCode, buttons: 0, detail: 1 });
+          fireMouse(el, 'auxclick', { button: btnCode, buttons: 0, detail: 1 });
+          return { success: true, description: `Middle-clicked [${target}]` };
+        }
+        // Left click (single / double / triple)
+        for (let i = 1; i <= count; i++) {
           fireMouse(el, 'mousedown', { detail: i, button: 0, buttons: 1 });
           fireMouse(el, 'mouseup', { detail: i, button: 0, buttons: 0 });
           fireMouse(el, 'click', { detail: i, button: 0, buttons: 0 });
           if (i === 2) fireMouse(el, 'dblclick', { detail: 2, button: 0, buttons: 0 });
         }
-        return { success: true, description: `Triple-clicked [${target}]` };
-      }
-
-      case 'left_mouse_down': {
-        const resolved = resolvePointerTarget(target, params, false);
-        if (!resolved.ok) return resolved.error;
-        const hit = fireMouseAt(resolved.doc, 'mousedown', resolved.x, resolved.y, {
-          button: 0,
-          buttons: 1,
-          detail: 1,
-        });
-        pointerState.isDown = true;
-        pointerState.doc = resolved.doc;
-        pointerState.x = resolved.x;
-        pointerState.y = resolved.y;
-        pointerState.target = hit || resolved.element;
-        return {
-          success: true,
-          description: `Left mouse down at (${resolved.x}, ${resolved.y})`,
-          x: resolved.x,
-          y: resolved.y,
-        };
-      }
-
-      case 'left_mouse_up': {
-        let resolved = null;
-        if ((target !== undefined && target !== null && target !== '') || hasNumeric(params.x) || hasNumeric(params.y)) {
-          resolved = resolvePointerTarget(target, params, false);
-          if (!resolved.ok) return resolved.error;
-        } else if (pointerState.doc && hasNumeric(pointerState.x) && hasNumeric(pointerState.y)) {
-          resolved = {
-            ok: true,
-            doc: pointerState.doc,
-            x: Number(pointerState.x),
-            y: Number(pointerState.y),
-            element: pointerState.target || pointerState.doc.body,
-          };
-        } else {
-          resolved = resolvePointerTarget(target, params, false);
+        if (count === 1 && heldModifiers.size === 0) {
+          el.click();
         }
-
-        const hit = fireMouseAt(resolved.doc, 'mouseup', resolved.x, resolved.y, {
-          button: 0,
-          buttons: 0,
-          detail: 1,
-        });
-        pointerState.isDown = false;
-        pointerState.doc = resolved.doc;
-        pointerState.x = resolved.x;
-        pointerState.y = resolved.y;
-        pointerState.target = hit || resolved.element;
-        return {
-          success: true,
-          description: `Left mouse up at (${resolved.x}, ${resolved.y})`,
-          x: resolved.x,
-          y: resolved.y,
-        };
-      }
-
-      case 'click_at': {
-        const doc = getActiveDocument();
-        const x = Number(params?.x);
-        const y = Number(params?.y);
-        if (!Number.isFinite(x) || !Number.isFinite(y)) {
-          return makeError(ACTION_ERROR.INVALID_ACTION, 'click_at requires numeric x and y');
-        }
-        const buttonName = String(params?.button || 'left').toLowerCase();
-        const buttonMap = { left: 0, middle: 1, right: 2 };
-        const buttonsMap = { left: 1, middle: 4, right: 2 };
-        const button = buttonMap[buttonName] ?? 0;
-        const buttons = buttonsMap[buttonName] ?? 1;
-        const count = Math.min(Math.max(Number(params?.clickCount) || 1, 1), 3);
-        let lastHit = null;
-
-        for (let i = 1; i <= count; i++) {
-          lastHit = fireMouseAt(doc, 'mousedown', x, y, { button, buttons, detail: i });
-          lastHit = fireMouseAt(doc, 'mouseup', x, y, { button, buttons: 0, detail: i });
-          if (button === 2) {
-            lastHit = fireMouseAt(doc, 'contextmenu', x, y, { button, buttons: 0, detail: i });
-          } else if (button === 1) {
-            lastHit = fireMouseAt(doc, 'auxclick', x, y, { button, buttons: 0, detail: i });
-          } else {
-            lastHit = fireMouseAt(doc, 'click', x, y, { button, buttons: 0, detail: i });
-            if (i === 2) {
-              lastHit = fireMouseAt(doc, 'dblclick', x, y, { button, buttons: 0, detail: 2 });
-            }
-          }
-        }
-
-        pointerState.x = Math.round(x);
-        pointerState.y = Math.round(y);
-        pointerState.doc = doc;
-        pointerState.target = lastHit || doc.body;
-        pointerState.isDown = false;
-        return {
-          success: true,
-          description: `Clicked at (${Math.round(x)}, ${Math.round(y)})`,
-          x: Math.round(x),
-          y: Math.round(y),
-          button: buttonName,
-          clickCount: count,
-        };
-      }
-
-      case 'drag_at': {
-        const doc = getActiveDocument();
-        const fromX = Number(params?.fromX);
-        const fromY = Number(params?.fromY);
-        const toX = Number(params?.toX);
-        const toY = Number(params?.toY);
-        if (![fromX, fromY, toX, toY].every(Number.isFinite)) {
-          return makeError(ACTION_ERROR.INVALID_ACTION, 'drag_at requires numeric fromX/fromY/toX/toY');
-        }
-        const steps = Math.min(Math.max(Number(params?.steps) || 10, 1), 60);
-
-        fireMouseAt(doc, 'mousedown', fromX, fromY, { button: 0, buttons: 1, detail: 1 });
-        for (let i = 1; i <= steps; i++) {
-          const t = i / steps;
-          const x = fromX + ((toX - fromX) * t);
-          const y = fromY + ((toY - fromY) * t);
-          fireMouseAt(doc, 'mousemove', x, y, { button: 0, buttons: 1, detail: 1 });
-        }
-        const hit = fireMouseAt(doc, 'mouseup', toX, toY, { button: 0, buttons: 0, detail: 1 });
-        pointerState.isDown = false;
-        pointerState.doc = doc;
-        pointerState.x = Math.round(toX);
-        pointerState.y = Math.round(toY);
-        pointerState.target = hit || doc.body;
-        return {
-          success: true,
-          description: `Dragged from (${Math.round(fromX)}, ${Math.round(fromY)}) to (${Math.round(toX)}, ${Math.round(toY)})`,
-          from: { x: Math.round(fromX), y: Math.round(fromY) },
-          to: { x: Math.round(toX), y: Math.round(toY) },
-        };
-      }
-
-      case 'double_click': {
-        const el = findElementById(target);
-        if (!el) return makeError(ACTION_ERROR.ELEMENT_NOT_FOUND, `Element [${target}] not found`, { target });
-        el.scrollIntoView({ block: 'center', behavior: 'instant' });
-        fireMouse(el, 'mousedown', { detail: 1, button: 0 });
-        fireMouse(el, 'mouseup', { detail: 1, button: 0 });
-        fireMouse(el, 'click', { detail: 1, button: 0 });
-        fireMouse(el, 'mousedown', { detail: 2, button: 0 });
-        fireMouse(el, 'mouseup', { detail: 2, button: 0 });
-        fireMouse(el, 'click', { detail: 2, button: 0 });
-        fireMouse(el, 'dblclick', { detail: 2, button: 0 });
-        return { success: true, description: `Double-clicked [${target}]` };
-      }
-
-      case 'right_click': {
-        const el = findElementById(target);
-        if (!el) return makeError(ACTION_ERROR.ELEMENT_NOT_FOUND, `Element [${target}] not found`, { target });
-        el.scrollIntoView({ block: 'center', behavior: 'instant' });
-        fireMouse(el, 'mousedown', { button: 2, buttons: 2 });
-        fireMouse(el, 'mouseup', { button: 2, buttons: 2 });
-        fireMouse(el, 'contextmenu', { button: 2, buttons: 2 });
-        return { success: true, description: `Right-clicked [${target}]` };
-      }
-
-      case 'drag_drop': {
-        const sourceId = Number(params?.source);
-        const source = findElementById(sourceId);
-        const destination = findElementById(target);
-        if (!source) return makeError(ACTION_ERROR.ELEMENT_NOT_FOUND, `Source [${params?.source}] not found`, { source: params?.source });
-        if (!destination) return makeError(ACTION_ERROR.ELEMENT_NOT_FOUND, `Target [${target}] not found`, { target });
-        if (typeof DataTransfer === 'undefined' || typeof DragEvent === 'undefined') {
-          return makeError(ACTION_ERROR.INVALID_ACTION, 'Drag and drop is not supported in this page context');
-        }
-
-        source.scrollIntoView({ block: 'center', behavior: 'instant' });
-        destination.scrollIntoView({ block: 'center', behavior: 'instant' });
-
-        const dt = new DataTransfer();
-        source.dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer: dt }));
-        destination.dispatchEvent(new DragEvent('dragenter', { bubbles: true, cancelable: true, dataTransfer: dt }));
-        destination.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: dt }));
-        destination.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }));
-        source.dispatchEvent(new DragEvent('dragend', { bubbles: true, cancelable: true, dataTransfer: dt }));
-        return { success: true, description: `Dragged [${params?.source}] to [${target}]` };
+        const clickDesc = count === 1 ? 'Clicked' : count === 2 ? 'Double-clicked' : 'Triple-clicked';
+        return { success: true, description: `${clickDesc} [${target}]` };
       }
 
       case 'type': {
@@ -851,7 +529,30 @@
           return makeError(ACTION_ERROR.INVALID_TARGET, `Element [${target}] is not a text input`, { target });
         }
 
-        return { success: true, description: `Typed "${params.text}" into [${target}]` };
+        const pressEnter = toBooleanLoose(params?.enter);
+        if (pressEnter) {
+          const keydownEvent = new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true });
+          el.dispatchEvent(keydownEvent);
+          const keypressEvent = new KeyboardEvent('keypress', { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true });
+          el.dispatchEvent(keypressEvent);
+          const keyupEvent = new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', bubbles: true });
+          el.dispatchEvent(keyupEvent);
+
+          const form = el.closest('form');
+          if (form) {
+            const submitBtn = form.querySelector('[type="submit"], button:not([type="button"])');
+            if (submitBtn) {
+              submitBtn.click();
+            } else {
+              try { form.submit(); } catch (_) { /* ignore */ }
+            }
+          }
+        }
+
+        return {
+          success: true,
+          description: `Typed "${params.text}" into [${target}]${pressEnter ? ' and pressed Enter' : ''}`
+        };
       }
 
       case 'scroll': {
@@ -889,166 +590,51 @@
         const keyTarget = target || activeDoc.activeElement || activeDoc.body;
         const el = typeof keyTarget === 'number' ? findElementById(keyTarget) : activeDoc.activeElement;
         const flags = modifierFlags(params.modifiers);
-        const keyEvent = new KeyboardEvent('keydown', {
+        const dispatchEl = el || activeDoc.body;
+
+        const keydownEvent = new KeyboardEvent('keydown', {
+          key: params.key,
+          code: params.key,
+          bubbles: true,
+          cancelable: true,
+          ...flags,
+        });
+        dispatchEl.dispatchEvent(keydownEvent);
+
+        // keypress is required for form submission in many frameworks (e.g. Google Search)
+        const keypressEvent = new KeyboardEvent('keypress', {
+          key: params.key,
+          code: params.key,
+          bubbles: true,
+          cancelable: true,
+          ...flags,
+        });
+        dispatchEl.dispatchEvent(keypressEvent);
+
+        const keyupEvent = new KeyboardEvent('keyup', {
           key: params.key,
           code: params.key,
           bubbles: true,
           ...flags,
         });
-        (el || activeDoc.body).dispatchEvent(keyEvent);
-        const upEvent = new KeyboardEvent('keyup', {
-          key: params.key,
-          code: params.key,
-          bubbles: true,
-          ...flags,
-        });
-        (el || activeDoc.body).dispatchEvent(upEvent);
-        return { success: true, description: `Pressed ${params.key}` };
-      }
+        dispatchEl.dispatchEvent(keyupEvent);
 
-      case 'hold_key': {
-        const activeDoc = getActiveDocument();
-        const state = String(params?.state || 'hold').toLowerCase();
-        const normalizedKey = normalizeModifier(params?.key || target);
-
-        if (state === 'clear') {
-          const toRelease = Array.from(heldModifiers);
-          for (const key of toRelease) {
-            dispatchModifierKey(activeDoc, key, false);
-          }
-          heldModifiers.clear();
-          return { success: true, description: 'Cleared held modifier keys', held: [] };
-        }
-
-        if (!normalizedKey) {
-          return makeError(ACTION_ERROR.INVALID_ACTION, 'hold_key requires key in {Control, Shift, Alt, Meta}');
-        }
-
-        if (state === 'release') {
-          if (heldModifiers.has(normalizedKey)) {
-            dispatchModifierKey(activeDoc, normalizedKey, false);
-            heldModifiers.delete(normalizedKey);
-          }
-          return {
-            success: true,
-            description: `Released ${normalizedKey}`,
-            held: Array.from(heldModifiers),
-          };
-        }
-
-        if (!heldModifiers.has(normalizedKey)) {
-          heldModifiers.add(normalizedKey);
-          dispatchModifierKey(activeDoc, normalizedKey, true);
-        }
-        return {
-          success: true,
-          description: `Holding ${normalizedKey}`,
-          held: Array.from(heldModifiers),
-        };
-      }
-
-      case 'form_input': {
-        const el = findElementById(target);
-        if (!el) return makeError(ACTION_ERROR.ELEMENT_NOT_FOUND, `Element [${target}] not found`, { target });
-        if (isSensitiveElement(el) && !params?.confirm) {
-          return makeError(
-            ACTION_ERROR.CONFIRMATION_REQUIRED,
-            `Element [${target}] appears sensitive. Repeat action with confirm=true.`,
-            { target },
-          );
-        }
-        if ((el.type === 'checkbox' || el.type === 'radio') && 'checked' in el) {
-          el.checked = params.checked ?? !el.checked;
-        } else if (el instanceof HTMLSelectElement) {
-          el.value = String(params?.value ?? '');
-        } else {
-          const ok = setTextLikeValue(el, String(params?.value ?? ''));
-          if (!ok) {
-            return makeError(ACTION_ERROR.INVALID_TARGET, `Element [${target}] cannot accept form input`, { target });
-          }
-        }
-        el.dispatchEvent(new Event('input', { bubbles: true }));
-        el.dispatchEvent(new Event('change', { bubbles: true }));
-        return { success: true, description: `Set form value on [${target}]` };
-      }
-
-      case 'switch_frame': {
-        const resolved = resolveFrameElement(target, params);
-        if (!resolved) {
-          return makeError(ACTION_ERROR.ELEMENT_NOT_FOUND, `Frame target not found: ${String(target)}`);
-        }
-        if (resolved.mode === 'main') {
-          resetFrameContext();
-          return { success: true, frame: 'main', description: 'Switched to main document' };
-        }
-
-        try {
-          const frameDoc = resolved.element.contentDocument;
-          const frameWin = resolved.element.contentWindow;
-          if (!frameDoc || !frameWin) {
-            return makeError(ACTION_ERROR.INVALID_TARGET, 'Frame document is not accessible');
-          }
-          activeDocument = frameDoc;
-          activeFrameLabel = resolved.label || 'iframe';
-          clearFindTextState();
-          frameWin.focus();
-          return {
-            success: true,
-            frame: activeFrameLabel,
-            url: frameWin.location.href,
-            title: frameDoc.title || '',
-            description: `Switched to frame ${activeFrameLabel}`,
-          };
-        } catch (err) {
-          return makeError(ACTION_ERROR.INVALID_TARGET, `Cannot access frame (likely cross-origin): ${err.message}`);
-        }
-      }
-
-      case 'upload_file': {
-        const el = findElementById(target);
-        if (!el) return makeError(ACTION_ERROR.ELEMENT_NOT_FOUND, `Element [${target}] not found`, { target });
-        if (!(el instanceof HTMLInputElement) || el.type !== 'file') {
-          return makeError(ACTION_ERROR.INVALID_TARGET, `Element [${target}] is not a file input`, { target });
-        }
-
-        const files = Array.isArray(params?.files) ? params.files : [];
-        if (files.length === 0) {
-          return makeError(ACTION_ERROR.INVALID_ACTION, 'No files provided for upload');
-        }
-        if (typeof DataTransfer === 'undefined') {
-          return makeError(ACTION_ERROR.INVALID_ACTION, 'DataTransfer is not available on this page');
-        }
-
-        const dt = new DataTransfer();
-        const names = [];
-        for (let i = 0; i < files.length; i++) {
-          const f = files[i] || {};
-          const name = String(f.name || `file_${i + 1}.txt`);
-          const type = String(f.mimeType || 'application/octet-stream');
-          const lastModified = Number(f.lastModified) || Date.now();
-          let payload = null;
-
-          if (typeof f.contentBase64 === 'string' && f.contentBase64.trim()) {
-            try {
-              payload = decodeBase64ToBytes(f.contentBase64);
-            } catch (err) {
-              return makeError(ACTION_ERROR.INVALID_ACTION, `Invalid base64 for file "${name}": ${err.message}`);
+        // For Enter: also try form.submit() if the active element is inside a form
+        // This handles React/modern apps that don't respond to synthetic key events
+        if ((params.key === 'Enter' || params.key === 'Return') && dispatchEl !== activeDoc.body) {
+          const form = dispatchEl.closest('form');
+          if (form) {
+            // Find and click the submit button first (more compatible than form.submit())
+            const submitBtn = form.querySelector('[type="submit"], button:not([type="button"])');
+            if (submitBtn) {
+              submitBtn.click();
+            } else {
+              try { form.submit(); } catch (_) { /* ignore */ }
             }
-          } else if (typeof f.text === 'string') {
-            payload = f.text;
-          } else {
-            return makeError(ACTION_ERROR.INVALID_ACTION, `File "${name}" must include text or contentBase64`);
           }
-
-          const file = new File([payload], name, { type, lastModified });
-          dt.items.add(file);
-          names.push(name);
         }
 
-        el.files = dt.files;
-        el.dispatchEvent(new Event('input', { bubbles: true }));
-        el.dispatchEvent(new Event('change', { bubbles: true }));
-        return { success: true, description: `Uploaded ${names.length} file(s) to [${target}]`, files: names };
+        return { success: true, description: `Pressed ${params.key}` };
       }
 
       default:
@@ -1058,7 +644,7 @@
 
   // ===== JAVASCRIPT EXECUTION =====
 
-  // FIX #6: Use Function() instead of eval() — no access to local closure scope
+  // Use Function() instead of eval() to avoid local closure access
   function executeJavaScript(code) {
     try {
       const fn = new Function(code);
@@ -1639,12 +1225,12 @@
           {
             const activeDoc = getActiveDocument();
             const activeView = activeDoc.defaultView || window;
-          sendResponse({
-            url: activeView.location.href,
-            title: activeDoc.title,
-            readyState: activeDoc.readyState,
-            frame: activeFrameLabel,
-          });
+            sendResponse({
+              url: activeView.location.href,
+              title: activeDoc.title,
+              readyState: activeDoc.readyState,
+              frame: activeFrameLabel,
+            });
           }
           break;
         case 'startMonitoring':
