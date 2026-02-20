@@ -18,15 +18,11 @@ const sendBtn = document.getElementById('sendBtn');
 const resultBanner = document.getElementById('resultBanner');
 const statusDot = document.getElementById('statusDot');
 const btnSettings = document.getElementById('btnSettings');
-const btnBack = document.getElementById('btnBack');
 const btnHistory = document.getElementById('btnHistory');
-const btnHistoryBack = document.getElementById('btnHistoryBack');
 const btnHelp = document.getElementById('btnHelp');
-const btnHelpBack = document.getElementById('btnHelpBack');
 const chatView = document.getElementById('chatView');
 const settingsView = document.getElementById('settingsView');
 const historyView = document.getElementById('historyView');
-const helpView = document.getElementById('helpView');
 const historyList = document.getElementById('historyList');
 const historyEmpty = document.getElementById('historyEmpty');
 const tierGroups = document.getElementById('tierGroups');
@@ -134,18 +130,12 @@ sendBtn.addEventListener('click', () => {
 
   currentGoal = goal;
 
-  // Clear previous steps and hide capabilities
+  // Clear previous steps and restore from collapsed state
   stepsContainer.innerHTML = '';
   stepsContainer.classList.remove('finished');
-  stepsContainer.style.display = 'flex'; // show steps
-  
-  const emptyStateEl = document.getElementById('emptyState');
-  if (emptyStateEl) emptyStateEl.style.display = 'none'; // hide accordions
-  const capabilitiesHeader = document.getElementById('capabilitiesHeader');
-  if (capabilitiesHeader) capabilitiesHeader.style.display = 'none'; // hide header
-  const suggestionsContainer = document.getElementById('suggestionsContainer');
-  if (suggestionsContainer) suggestionsContainer.style.display = 'none';
-
+  emptyState.style.display = 'none';
+  const capHeader = document.getElementById('capabilitiesHeader');
+  if (capHeader) capHeader.style.display = 'none';
   resultBanner.style.display = 'none';
   resultBanner.className = 'result-banner';
   resultBanner.textContent = '';
@@ -392,214 +382,40 @@ function summarizeArgs(tool, args) {
 
 // ===== Settings =====
 
-btnSettings.addEventListener('click', () => {
-  chatView.classList.remove('active');
-  historyView.classList.remove('active');
-  helpView.classList.remove('active');
-  settingsView.classList.add('active');
-  port.postMessage({ type: 'getConfig' });
-});
 
-btnBack.addEventListener('click', () => {
-  settingsView.classList.remove('active');
-  historyView.classList.remove('active');
-  helpView.classList.remove('active');
-  chatView.classList.add('active');
-});
+function switchTab(viewId, btnId) {
+  // Hide all views
+  ['chatView', 'settingsView', 'scheduleView', 'historyView'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.classList.remove('active');
+  });
+  // Deactivate all tabs
+  ['btnHelp', 'btnSettings', 'btnSchedule', 'btnHistory'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.classList.remove('active');
+  });
 
-btnHelp.addEventListener('click', () => {
-  chatView.classList.remove('active');
-  settingsView.classList.remove('active');
-  historyView.classList.remove('active');
-  helpView.classList.add('active');
-});
+  // Activate selected
+  const targetView = document.getElementById(viewId);
+  if (targetView) targetView.classList.add('active');
+  
+  const targetBtn = document.getElementById(btnId);
+  if (targetBtn) targetBtn.classList.add('active');
 
-btnHelpBack.addEventListener('click', () => {
-  helpView.classList.remove('active');
-  settingsView.classList.remove('active');
-  historyView.classList.remove('active');
-  chatView.classList.add('active');
-});
-
-function renderSettings() {
-  if (!config || !providerInfo) return;
-
-  const tiers = {
-    recommended: { icon: icon('star'), title: 'RECOMMENDED', desc: 'Best quality.', providers: [] },
-    budget: { icon: icon('dollar'), title: 'BUDGET', desc: 'Cheapest option.', providers: [] },
-    free: { icon: icon('home'), title: 'FREE', desc: 'Runs locally.', providers: [] },
-  };
-
-  for (const [name, info] of Object.entries(providerInfo)) {
-    const tier = info.tier || 'budget';
-    if (tiers[tier]) tiers[tier].providers.push({ name, info });
-  }
-
-  const activeTier = providerInfo[config.primary]?.tier || 'budget';
-  tierGroups.innerHTML = '';
-
-  for (const [tierKey, tier] of Object.entries(tiers)) {
-    if (tier.providers.length === 0) continue;
-    const isActive = tierKey === activeTier;
-    const group = document.createElement('div');
-    group.className = 'tier-group' + (isActive ? ' active' : '');
-    const providerDisplayNames = {
-      siliconflow: 'SiliconFlow',
-      groq: 'Groq',
-      ollama: 'Ollama',
-    };
-    group.innerHTML = `<div class="tier-header">
-      <h3>${tier.icon} ${escapeHtml(tier.title)}</h3>
-      <span class="tier-desc">${escapeHtml(tier.desc)}</span>
-    </div>`;
-
-    for (const { name, info } of tier.providers) {
-      const status = providerStatus?.[name];
-      const provConf = config.providers?.[name] || {};
-      const card = document.createElement('div');
-      card.className = 'provider-card' + (config.primary === name ? ' active' : '');
-      const providerKeyLabel = providerDisplayNames[name] || info?.label || name;
-
-      const statusClass = status?.available ? 'ok' : status?.configured ? 'fail' : 'unknown';
-      const statusLabel = status?.available ? 'Connected' : status?.configured ? 'Error' : 'Not configured';
-
-      card.innerHTML = `
-        <div class="card-header">
-          <h3><span class="status-dot ${statusClass}"></span>${escapeHtml(info.label || '')}</h3>
-          <span class="pricing">${escapeHtml(info.pricing || '')}</span>
-        </div>
-        <div class="note">${escapeHtml(info.note || '')}</div>
-        ${name !== 'ollama' ? `
-          <label>${escapeHtml(providerKeyLabel)} API Key</label>
-          <input type="password" id="key_${name}" value="${escapeAttr(provConf.apiKey || '')}" placeholder="Enter API key">
-        ` : ''}
-        <label>Model</label>
-        <input type="text" id="model_${name}" value="${escapeAttr(provConf.model || '')}" placeholder="Model name">
-        ${name === 'ollama' ? `
-          <label>Base URL</label>
-          <input type="text" id="url_${name}" value="${escapeAttr(provConf.baseUrl || 'http://localhost:11434/v1')}" placeholder="http://localhost:11434/v1">
-        ` : ''}
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px;">
-          <button class="test-btn" data-provider="${name}">Test Connection</button>
-          <span class="test-status" id="testStatus_${name}" style="font-size:11px;color:var(--text2);">${escapeHtml(statusLabel)}</span>
-        </div>
-      `;
-
-      group.appendChild(card);
-
-      // Bind events (deferred to allow DOM insertion)
-      setTimeout(() => {
-        card.querySelectorAll('input').forEach(input => {
-          input.addEventListener('change', () => saveProviderConfig(name));
-        });
-        card.querySelector('.test-btn')?.addEventListener('click', () => {
-          const providerConfig = collectProviderConfig(name);
-          config.providers = { ...config.providers, [name]: providerConfig };
-          const el = document.getElementById(`testStatus_${name}`);
-          if (el) el.textContent = 'Testing...';
-          port.postMessage({ type: 'testProvider', providerName: name, providerConfig });
-        });
-      }, 0);
-    }
-
-    // Activate tier button
-    const activateBtn = document.createElement('button');
-    activateBtn.className = 'tier-activate-btn';
-    if (isActive) {
-      activateBtn.innerHTML = `${icon('check')} Active`;
-    } else {
-      const selectedProvider = pickBestProviderInTier(tier.providers);
-      activateBtn.textContent = `Use ${tier.title}`;
-      activateBtn.addEventListener('click', () => {
-        if (selectedProvider) {
-          config.primary = selectedProvider;
-          port.postMessage({ type: 'updateConfig', config: { primary: selectedProvider } });
-          renderSettings();
-          updateModeBadge();
-        }
-      });
-    }
-
-    group.appendChild(activateBtn);
-    tierGroups.appendChild(group);
-  }
-
-  updateModeBadge();
-}
-
-function updateModeBadge() {
-  if (!modeBadge || !config || !providerInfo) return;
-  const info = providerInfo[config.primary];
-  if (!info) { modeBadge.textContent = ''; return; }
-  if (info.vision) {
-    modeBadge.textContent = 'Vision';
-    modeBadge.style.background = 'rgba(0, 184, 148, 0.15)';
-    modeBadge.style.color = 'var(--success)';
-  } else {
-    modeBadge.textContent = 'Text';
-    modeBadge.style.background = 'rgba(139, 143, 163, 0.15)';
-    modeBadge.style.color = 'var(--text2)';
+  if (viewId === 'settingsView') {
+    sendMsg({ type: 'getConfig' });
+    sendMsg({ type: 'getBlocklist' });
+  } else if (viewId === 'scheduleView') {
+    sendMsg({ type: 'getScheduledTasks' });
+  } else if (viewId === 'historyView') {
+    renderHistory();
   }
 }
 
-function saveProviderConfig(name) {
-  const providers = { ...config.providers };
-  providers[name] = collectProviderConfig(name);
+btnHelp.addEventListener('click', () => switchTab('chatView', 'btnHelp'));
+btnSettings.addEventListener('click', () => switchTab('settingsView', 'btnSettings'));
+btnSchedule.addEventListener('click', () => switchTab('scheduleView', 'btnSchedule'));
 
-  config.providers = providers;
-  port.postMessage({ type: 'updateConfig', config: { providers } });
-}
-
-function collectProviderConfig(name) {
-  const keyEl = document.getElementById(`key_${name}`);
-  const modelEl = document.getElementById(`model_${name}`);
-  const urlEl = document.getElementById(`url_${name}`);
-  return {
-    ...(config.providers?.[name] || {}),
-    ...(keyEl && { apiKey: keyEl.value }),
-    ...(modelEl && { model: modelEl.value }),
-    ...(urlEl && { baseUrl: urlEl.value }),
-  };
-}
-
-function showTestResult(msg) {
-  const el = document.getElementById(`testStatus_${msg.provider}`);
-  if (!el) return;
-  providerStatus = providerStatus || {};
-  providerStatus[msg.provider] = {
-    ...(providerStatus[msg.provider] || {}),
-    configured: msg.provider === 'ollama'
-      ? true
-      : !!config?.providers?.[msg.provider]?.apiKey,
-    available: !!msg.available,
-    model: config?.providers?.[msg.provider]?.model || providerStatus[msg.provider]?.model || '',
-    isPrimary: config?.primary === msg.provider,
-  };
-  if (msg.available) {
-    el.innerHTML = `${icon('check-circle')} Connected`;
-    el.style.color = 'var(--success)';
-  } else {
-    el.innerHTML = `${icon('x-circle')} ` + escapeHtml(msg.error || 'Failed');
-    el.style.color = 'var(--error)';
-  }
-}
-
-// ===== History =====
-
-btnHistory.addEventListener('click', () => {
-  chatView.classList.remove('active');
-  settingsView.classList.remove('active');
-  helpView.classList.remove('active');
-  historyView.classList.add('active');
-  renderHistory();
-});
-
-btnHistoryBack.addEventListener('click', () => {
-  historyView.classList.remove('active');
-  settingsView.classList.remove('active');
-  helpView.classList.remove('active');
-  chatView.classList.add('active');
-});
 
 async function saveTaskToHistory(goal, result) {
   if (!goal) return;
