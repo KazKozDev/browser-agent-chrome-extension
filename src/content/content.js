@@ -229,20 +229,46 @@
   function extractAccessibilityTree(options = {}) {
     const activeDoc = getActiveDocument();
     const activeView = activeDoc.defaultView || window;
-    const maxDepth = options.maxDepth || 15;
-    const maxNodes = options.maxNodes || 500;
-    let nodeCount = 0;
-    // FIX #3: Continue from global seed — no ID conflicts with findByDescription
+    const maxNodes = Math.min(Math.max(Number(options.maxNodes) || 180, 20), 260);
+    const viewportOnly = options.viewportOnly === true;
+    const vpW = activeView.innerWidth || activeDoc.documentElement.clientWidth;
+    const vpH = activeView.innerHeight || activeDoc.documentElement.clientHeight;
+    const compact = options.compact !== false;
+
+    // Continue from global seed to keep IDs unique for findByDescription
     const startSeed = findAgentSeed;
     let interactiveId = findAgentSeed;
+    const blockedTags = new Set(['SCRIPT', 'STYLE', 'SVG', 'NOSCRIPT']);
 
-    // FIX #1: Use textContent (no layout reflow) + limit first-child traversal
+    const normalizeText = (value, limit = 80) => String(value || '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, limit);
+
+    const isBlockedBranch = (el) => {
+      let cur = el;
+      while (cur && cur !== activeDoc.body) {
+        if (blockedTags.has(cur.tagName)) return true;
+        cur = cur.parentElement;
+      }
+      return false;
+    };
+
+    // Use textContent (no layout reflow) and cap traversal output size
     function getAccessibleName(el) {
       const label = el.getAttribute('aria-label')
         || el.getAttribute('alt')
         || el.getAttribute('title')
         || el.getAttribute('placeholder');
       if (label) return label;
+
+      if (el.id) {
+        const byFor = activeDoc.querySelector(`label[for="${cssEscape(el.id)}"]`);
+        if (byFor?.textContent) return byFor.textContent;
+      }
+
+      const wrappedLabel = el.closest('label');
+      if (wrappedLabel?.textContent) return wrappedLabel.textContent;
 
       // textContent is layout-free (faster than innerText)
       const raw = el.textContent;
@@ -251,18 +277,71 @@
       return raw.slice(0, 120).replace(/\s+/g, ' ').trim().slice(0, 80);
     }
 
-    // FIX #2: Defer expensive getComputedStyle to last check
+    // Defer expensive getComputedStyle check until fast checks fail
     function isInteractive(el) {
       const tag = el.tagName.toLowerCase();
       if (['a', 'button', 'input', 'select', 'textarea', 'summary'].includes(tag)) return true;
-      if (el.getAttribute('role') === 'button' || el.getAttribute('role') === 'link') return true;
+      const role = el.getAttribute('role');
+      if (role === 'button' || role === 'link' || role === 'tab' || role === 'menuitem'
+          || role === 'option' || role === 'switch' || role === 'checkbox' || role === 'radio'
+          || role === 'combobox' || role === 'slider' || role === 'spinbutton'
+          || role === 'treeitem' || role === 'listbox') return true;
       if (el.onclick || el.getAttribute('onclick')) return true;
       if (el.tabIndex >= 0) return true;
+      // SPA frameworks: detect click listeners via common data attributes
+      if (el.hasAttribute('data-action') || el.hasAttribute('data-click')
+          || el.hasAttribute('data-toggle') || el.hasAttribute('data-dismiss')
+          || el.hasAttribute('data-bs-toggle') || el.hasAttribute('data-testid')
+          || el.hasAttribute('ng-click') || el.hasAttribute('v-on:click')
+          || el.hasAttribute('@click')) return true;
+      // Contenteditable divs (rich text editors)
+      if (el.isContentEditable && tag !== 'body') return true;
       // Expensive — only reached if nothing else matched
       try {
         if (getComputedStyle(el).cursor === 'pointer') return true;
       } catch { /* detached node */ }
       return false;
+    }
+
+    function makeCompactNode(el) {
+      if (!el || el.nodeType !== 1) return null;
+      if (!isElementVisible(el) || isBlockedBranch(el)) return null;
+
+      if (viewportOnly) {
+        const r = el.getBoundingClientRect();
+        if (r.bottom < 0 || r.top > vpH || r.right < 0 || r.left > vpW) return null;
+      }
+
+      if (!isInteractive(el)) return null;
+
+      interactiveId += 1;
+      const id = interactiveId;
+      el.setAttribute('data-agent-id', String(id));
+
+      const tag = el.tagName.toLowerCase();
+      const role = getElementRole(el) || tag;
+      const name = normalizeText(getAccessibleName(el), 80);
+      const placeholder = normalizeText(el.getAttribute('placeholder') || '', 50);
+      const href = tag === 'a' ? normalizeText(el.getAttribute('href') || '', 120) : '';
+      const type = tag === 'input' ? normalizeText(el.getAttribute('type') || 'text', 24) : '';
+      const state = getState(el);
+
+      const lineParts = [`[${id}]`, role];
+      if (name) lineParts.push(`"${name}"`);
+      if (placeholder) lineParts.push(`placeholder="${placeholder}"`);
+      if (type && type !== 'text') lineParts.push(`type="${type}"`);
+      if (href) lineParts.push(`href="${href}"`);
+
+      return {
+        id,
+        role,
+        tag,
+        name: name || undefined,
+        placeholder: placeholder || undefined,
+        href: href || undefined,
+        state: state || undefined,
+        line: lineParts.join(' '),
+      };
     }
 
     function getState(el) {
@@ -281,107 +360,55 @@
       return Object.keys(state).length > 0 ? state : null;
     }
 
-    function traverse(el, depth = 0) {
-      if (nodeCount >= maxNodes || depth > maxDepth) return null;
-      if (!el || el.nodeType !== 1) return null;
-      if (!isElementVisible(el)) return null;
-
-      const tag = el.tagName.toLowerCase();
-      if (['script', 'style', 'noscript', 'meta', 'link'].includes(tag)) return null;
-
-      // Iframe detection — report presence without traversing cross-origin DOM
-      if (tag === 'iframe') {
-        nodeCount++;
-        interactiveId++;
-        const rect = el.getBoundingClientRect();
-        el.setAttribute('data-agent-id', String(interactiveId));
-        const iframeNode = {
-          id: interactiveId,
-          tag: 'iframe',
-          role: 'iframe',
-          rect: {
-            x: Math.round(rect.x),
-            y: Math.round(rect.y),
-            w: Math.round(rect.width),
-            h: Math.round(rect.height),
-          },
-        };
-        const iframeName = el.title || el.getAttribute('aria-label') || '';
-        if (iframeName) iframeNode.name = iframeName;
-        iframeNode.src = el.src || '';
-        try {
-          const iframeDoc = el.contentDocument;
-          if (iframeDoc) {
-            iframeNode.accessible = true;
-            if (iframeDoc.title) iframeNode.name = iframeDoc.title;
-          }
-        } catch {
-          iframeNode.accessible = false;
-        }
-        return iframeNode;
-      }
-
-      const role = getElementRole(el);
-      const interactive = isInteractive(el);
-      const name = getAccessibleName(el);
-
-      // Recurse children
-      const children = [];
-      for (const child of el.children) {
-        const node = traverse(child, depth + 1);
-        if (node) children.push(node);
-      }
-
-      // Skip non-semantic containers with no role and one child (flatten)
-      if (!role && !interactive && !name && children.length === 1) {
-        return children[0];
-      }
-
-      // Skip empty non-interactive nodes
-      if (!role && !interactive && !name && children.length === 0) {
-        return null;
-      }
-
-      nodeCount++;
-      const node = {};
-
-      if (interactive) {
-        interactiveId++;
-        node.id = interactiveId;
-        const rect = el.getBoundingClientRect();
-        node.rect = {
-          x: Math.round(rect.x),
-          y: Math.round(rect.y),
-          w: Math.round(rect.width),
-          h: Math.round(rect.height),
-        };
-        el.setAttribute('data-agent-id', interactiveId);
-      }
-
-      if (role) node.role = role;
-      if (name) node.name = name;
-      if (tag) node.tag = tag;
-
-      const state = getState(el);
-      if (state) node.state = state;
-
-      if (children.length > 0) node.children = children;
-
-      return node;
+    const selector = 'a,button,input,select,textarea,summary,[role="button"],[role="link"],[role="tab"],[role="menuitem"],[role="option"],[role="switch"],[role="checkbox"],[role="radio"],[role="combobox"],[role="slider"],[role="spinbutton"],[role="treeitem"],[role="listbox"],[tabindex]';
+    const candidates = Array.from(activeDoc.querySelectorAll(selector));
+    const elements = [];
+    for (const el of candidates) {
+      if (elements.length >= maxNodes) break;
+      const node = makeCompactNode(el);
+      if (node) elements.push(node);
     }
 
-    const tree = traverse(activeDoc.body);
-    // FIX #3: Persist highest ID globally
+    const textSnippets = [];
+    if (compact) {
+      const textCandidates = activeDoc.querySelectorAll('h1,h2,h3,p,[role="heading"],main');
+      for (const el of textCandidates) {
+        if (textSnippets.length >= 10) break;
+        if (!isElementVisible(el) || isBlockedBranch(el)) continue;
+        const txt = normalizeText(el.textContent || '', 100);
+        if (!txt || txt.length < 12) continue;
+        if (textSnippets.includes(txt)) continue;
+        textSnippets.push(txt);
+      }
+    }
+
+    const tree = {
+      role: 'document',
+      children: elements.map((el) => ({
+        id: el.id,
+        role: el.role,
+        tag: el.tag,
+        name: el.name,
+        state: el.state,
+      })),
+    };
+
+    const lines = elements.map((el) => el.line);
+    for (const txt of textSnippets) lines.push(`[text] "${txt}"`);
+
+    // Persist highest ID globally for subsequent reads
     findAgentSeed = interactiveId;
 
-    // FIX #5: Include scroll position and page dimensions
+    // Include scroll position and page dimensions in output
     const docEl = activeDoc.documentElement;
     return {
       url: activeView.location.href,
       title: activeDoc.title,
       tree: tree,
+      elements,
+      snapshot: lines.join('\n'),
       interactiveCount: interactiveId - startSeed,
-      nodeCount: nodeCount,
+      nodeCount: 1 + elements.length + textSnippets.length,
       frame: activeFrameLabel,
       scroll: {
         x: Math.round(activeView.scrollX),
@@ -448,7 +475,7 @@
     return getActiveDocument().querySelector(`[data-agent-id="${agentId}"]`);
   }
 
-  // FIX #4: Wait for element to appear (SPA / dynamic content)
+  // Wait for element to appear on dynamic pages before acting
   function waitForElement(agentId, timeoutMs = 3000) {
     return new Promise((resolve) => {
       const el = findElementById(agentId);
@@ -611,14 +638,25 @@
             { target },
           );
         }
+        // Detect links that open in a new tab (target="_blank")
+        const linkEl = el.closest('a[href]');
+        const opensNewTab = linkEl && (linkEl.target === '_blank' || linkEl.getAttribute('target') === '_blank');
+        const linkHref = linkEl?.href || null;
+
         el.scrollIntoView({ block: 'center', behavior: 'instant' });
         fireMouse(el, 'mousedown', { button: 0, buttons: 1, detail: 1 });
         fireMouse(el, 'mouseup', { button: 0, buttons: 0, detail: 1 });
-        fireMouse(el, 'click', { button: 0, buttons: 0, detail: 1 });
-        if (heldModifiers.size === 0) {
-          el.click();
+        // Use el.click() for reliable cross-framework click. It dispatches a
+        // trusted "click" event that works with both native handlers and React/Vue/etc.
+        // Avoid also sending fireMouse('click') — that would fire a double click event.
+        el.click();
+        const result = { success: true, description: `Clicked [${target}]` };
+        if (opensNewTab && linkHref) {
+          result.opensNewTab = true;
+          result.href = linkHref;
+          result.description = `Clicked [${target}] — link opens in new tab (${linkHref}). Use list_tabs + switch_tab to access it, or navigate to the URL directly.`;
         }
-        return { success: true, description: `Clicked [${target}]` };
+        return result;
       }
 
       case 'mouse_move': {
@@ -889,20 +927,50 @@
         const keyTarget = target || activeDoc.activeElement || activeDoc.body;
         const el = typeof keyTarget === 'number' ? findElementById(keyTarget) : activeDoc.activeElement;
         const flags = modifierFlags(params.modifiers);
-        const keyEvent = new KeyboardEvent('keydown', {
+        const dispatchEl = el || activeDoc.body;
+
+        const keydownEvent = new KeyboardEvent('keydown', {
+          key: params.key,
+          code: params.key,
+          bubbles: true,
+          cancelable: true,
+          ...flags,
+        });
+        dispatchEl.dispatchEvent(keydownEvent);
+
+        // keypress is required for form submission in many frameworks (e.g. Google Search)
+        const keypressEvent = new KeyboardEvent('keypress', {
+          key: params.key,
+          code: params.key,
+          bubbles: true,
+          cancelable: true,
+          ...flags,
+        });
+        dispatchEl.dispatchEvent(keypressEvent);
+
+        const keyupEvent = new KeyboardEvent('keyup', {
           key: params.key,
           code: params.key,
           bubbles: true,
           ...flags,
         });
-        (el || activeDoc.body).dispatchEvent(keyEvent);
-        const upEvent = new KeyboardEvent('keyup', {
-          key: params.key,
-          code: params.key,
-          bubbles: true,
-          ...flags,
-        });
-        (el || activeDoc.body).dispatchEvent(upEvent);
+        dispatchEl.dispatchEvent(keyupEvent);
+
+        // For Enter: also try form.submit() if the active element is inside a form
+        // This handles React/modern apps that don't respond to synthetic key events
+        if ((params.key === 'Enter' || params.key === 'Return') && dispatchEl !== activeDoc.body) {
+          const form = dispatchEl.closest('form');
+          if (form) {
+            // Find and click the submit button first (more compatible than form.submit())
+            const submitBtn = form.querySelector('[type="submit"], button:not([type="button"])');
+            if (submitBtn) {
+              submitBtn.click();
+            } else {
+              try { form.submit(); } catch (_) { /* ignore */ }
+            }
+          }
+        }
+
         return { success: true, description: `Pressed ${params.key}` };
       }
 
@@ -1058,15 +1126,23 @@
 
   // ===== JAVASCRIPT EXECUTION =====
 
-  // FIX #6: Use Function() instead of eval() — no access to local closure scope
+  // Use Function() instead of eval() to avoid local closure access
   function executeJavaScript(code) {
     try {
       const fn = new Function(code);
       const result = fn();
-      return {
-        success: true,
-        result: result !== undefined ? String(result).slice(0, 5000) : 'undefined',
-      };
+      if (result === undefined) return { success: true, result: 'undefined' };
+      if (result === null) return { success: true, result: 'null' };
+      // Serialize objects/arrays as JSON so the agent can read structured data
+      if (typeof result === 'object') {
+        try {
+          const json = JSON.stringify(result, null, 2);
+          return { success: true, result: json.slice(0, 10000) };
+        } catch {
+          return { success: true, result: String(result).slice(0, 5000) };
+        }
+      }
+      return { success: true, result: String(result).slice(0, 5000) };
     } catch (err) {
       return makeError(ACTION_ERROR.JS_EXEC_FAILED, err.message);
     }
@@ -1189,6 +1265,7 @@
     query = String(query || '').toLowerCase().trim();
     if (!query) return [];
     const queryWords = query.split(/\s+/).filter(Boolean);
+    const queryHintsInput = /\b(search|find|lookup|query|иск|поиск|searchbox|input|поле|строк)\b/.test(query);
     const candidates = [];
 
     const selector = 'a, button, input, select, textarea, [role="button"], [role="link"], [onclick], [tabindex]';
@@ -1230,13 +1307,28 @@
       // Bonus for shorter text (more specific match is better)
       score += Math.max(0, 3 - text.length / 100);
 
+      const tag = el.tagName.toLowerCase();
+      const role = (getElementRole(el) || '').toLowerCase();
+      const type = String(el.getAttribute('type') || '').toLowerCase();
+      const looksLikeTextInput = tag === 'textarea'
+        || (tag === 'input' && !['button', 'submit', 'reset', 'checkbox', 'radio', 'file', 'range', 'color', 'image'].includes(type))
+        || role === 'textbox' || role === 'searchbox' || role === 'combobox';
+
+      if (queryHintsInput) {
+        if (looksLikeTextInput) score += 8;
+        if (role === 'button' || tag === 'button' || type === 'submit') score -= 4;
+      }
+
+      const hasSearchSignal = /\b(search|поиск|найти|искать)\b/.test(text) || type === 'search';
+      if (hasSearchSignal && looksLikeTextInput) score += 3;
+
       const rect = el.getBoundingClientRect();
       const agentId = ensureAgentId(el);
       candidates.push({
         agentId,
-        tag: el.tagName.toLowerCase(),
+        tag,
         text: el.innerText?.trim().slice(0, 60),
-        role: getElementRole(el),
+        role,
         score: Math.round(score * 100) / 100,
         rect: { x: Math.round(rect.x), y: Math.round(rect.y), w: Math.round(rect.width), h: Math.round(rect.height) },
       });
@@ -1576,12 +1668,31 @@
   const runtimeState = globalThis[RUNTIME_STATE_KEY] || (globalThis[RUNTIME_STATE_KEY] = {
     initialized: false,
     listenerInstalled: false,
+    observerInstalled: false,
+    domCache: { tree: null, text: null, dirty: true },
   });
+  const domCache = runtimeState.domCache;
 
   if (!runtimeState.initialized) {
     interceptConsole();
     interceptNetwork();
     runtimeState.initialized = true;
+  }
+
+  // ===== DOM CACHE (MutationObserver) =====
+  // Invalidate cache whenever the page DOM or scroll position changes.
+  // This prevents redundant re-parsing when the LLM calls read_page/get_page_text back-to-back.
+  if (!runtimeState.observerInstalled) {
+    const _invalidate = () => { domCache.dirty = true; };
+    const _target = document.body || document.documentElement;
+    if (_target) {
+      new MutationObserver(_invalidate).observe(_target, {
+        childList: true, subtree: true, attributes: true, characterData: true,
+      });
+    }
+    window.addEventListener('scroll', _invalidate, { passive: true });
+    window.addEventListener('popstate', _invalidate, { passive: true });
+    runtimeState.observerInstalled = true;
   }
 
   // ===== MESSAGE HANDLER =====
@@ -1592,10 +1703,30 @@
     try {
       switch (action) {
         case 'readPage':
-          sendResponse(extractAccessibilityTree(payload));
+          // viewportOnly changes the result, so skip cache when it's set
+          if (!domCache.dirty && domCache.tree && !payload?.viewportOnly) {
+            sendResponse({ ...domCache.tree, cached: true });
+          } else {
+            const _treeResult = extractAccessibilityTree(payload);
+            // Only cache full-page results (not viewportOnly)
+            if (!payload?.viewportOnly) {
+              domCache.tree = _treeResult;
+              domCache.text = null; // text cache may be stale after full re-parse
+              domCache.dirty = false;
+            }
+            sendResponse(_treeResult);
+          }
           break;
         case 'getPageText':
-          sendResponse(getPageText());
+          if (!domCache.dirty && domCache.text) {
+            sendResponse({ ...domCache.text, cached: true });
+          } else {
+            const _textResult = getPageText();
+            domCache.text = _textResult;
+            domCache.tree = null; // tree cache may be stale
+            domCache.dirty = false;
+            sendResponse(_textResult);
+          }
           break;
         case 'executeAction':
           sendResponse(executeAction(payload));
@@ -1663,6 +1794,9 @@
           });
           findAgentSeed = 0;
           resetFrameContext();
+          domCache.dirty = true;
+          domCache.tree = null;
+          domCache.text = null;
           sendResponse({ success: true });
           break;
         default:

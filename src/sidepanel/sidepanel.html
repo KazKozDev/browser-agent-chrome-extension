@@ -14,9 +14,9 @@
       --border: #3d3426;
       --text: #f4ead8;
       --text2: #b8a786;
-      --accent: #d4a24e;
-      --accent2: #e7be79;
-      --success: #00b894;
+      --accent: #b8944a;
+      --accent2: #c9a86e;
+      --success: #5e8f7a;
       --error: #e17055;
       --warning: #e7be79;
     }
@@ -55,6 +55,30 @@
       display: flex;
       align-items: center;
       gap: 8px;
+    }
+
+    .context-badge {
+      display: none;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.3px;
+      text-transform: uppercase;
+      padding: 2px 6px;
+      border-radius: 999px;
+      border: 1px solid;
+      line-height: 1.2;
+    }
+
+    .context-badge.warning {
+      color: #2d2400;
+      background: color-mix(in srgb, var(--warning) 65%, var(--surface));
+      border-color: color-mix(in srgb, var(--warning) 85%, var(--border));
+    }
+
+    .context-badge.critical {
+      color: #fff1ee;
+      background: color-mix(in srgb, var(--error) 55%, var(--surface));
+      border-color: color-mix(in srgb, var(--error) 75%, var(--border));
     }
 
     .header h1 .dot {
@@ -222,7 +246,7 @@
 
     /* Input area */
     .input-area {
-      padding: 12px 16px;
+      padding: 10px 14px 12px;
       border-top: 1px solid var(--border);
       flex-shrink: 0;
     }
@@ -237,13 +261,14 @@
       background: var(--surface);
       border: 1px solid var(--border);
       border-radius: 10px;
-      padding: 10px 14px;
+      padding: 9px 12px;
       color: var(--text);
       font-size: 13px;
       font-family: inherit;
       resize: none;
-      min-height: 40px;
-      max-height: 120px;
+      height: 38px;
+      min-height: 38px;
+      max-height: 100px;
       overflow-y: hidden;
       outline: none;
       transition: border-color 0.15s;
@@ -271,7 +296,7 @@
       justify-content: center;
       transition: all 0.15s;
       flex-shrink: 0;
-      align-self: flex-end;
+      align-self: center;
     }
 
     .send-btn:hover {
@@ -295,6 +320,244 @@
 
     .send-btn.resume:hover {
       background: #f3c259;
+    }
+
+    .input-actions {
+      display: flex;
+      gap: 6px;
+      padding-top: 6px;
+      align-items: center;
+    }
+
+    .input-actions .icon-btn {
+      width: 28px;
+      height: 28px;
+      font-size: 14px;
+      opacity: 0.6;
+      transition: opacity 0.15s, color 0.15s;
+    }
+
+    .input-actions .icon-btn:hover {
+      opacity: 1;
+    }
+
+    .input-actions .icon-btn.active {
+      opacity: 1;
+      color: var(--accent);
+    }
+
+    /* Custom tooltips for input-actions buttons */
+    .input-actions .icon-btn[data-tooltip] {
+      position: relative;
+    }
+
+    .input-actions .icon-btn[data-tooltip]::after {
+      content: attr(data-tooltip);
+      position: absolute;
+      bottom: calc(100% + 8px);
+      left: 0;
+      transform: scale(0.92);
+      transform-origin: bottom left;
+      background: var(--surface2);
+      color: var(--text);
+      font-size: 11px;
+      font-weight: 500;
+      padding: 5px 10px;
+      border-radius: 7px;
+      white-space: nowrap;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.18s, transform 0.18s;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.32);
+      border: 1px solid var(--border);
+      z-index: 100;
+    }
+
+    .input-actions .icon-btn[data-tooltip]:hover::after {
+      opacity: 1;
+      transform: scale(1);
+    }
+
+    .shortcuts-dropdown {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      max-height: 180px;
+      overflow-y: auto;
+      margin-bottom: 6px;
+    }
+
+    .shortcut-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 12px;
+      cursor: pointer;
+      font-size: 12px;
+      color: var(--text);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .shortcut-item:last-child {
+      border-bottom: none;
+    }
+
+    .shortcut-item:hover {
+      background: var(--surface2);
+    }
+
+    .shortcut-item .shortcut-text {
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .shortcut-item .shortcut-del {
+      opacity: 0;
+      font-size: 11px;
+      color: var(--text2);
+      cursor: pointer;
+      padding: 2px 4px;
+      border-radius: 4px;
+      border: none;
+      background: none;
+    }
+
+    .shortcut-item:hover .shortcut-del {
+      opacity: 1;
+    }
+
+    .shortcut-item .shortcut-del:hover {
+      color: var(--error);
+    }
+
+    .plan-banner {
+      margin: 0 16px 8px;
+      background: var(--surface);
+      border: 1px solid var(--accent);
+      border-radius: 10px;
+      padding: 12px 14px;
+      font-size: 12px;
+    }
+
+    .plan-banner .plan-header {
+      font-weight: 600;
+      color: var(--accent);
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .plan-banner .plan-text {
+      color: var(--text);
+      white-space: pre-wrap;
+      line-height: 1.5;
+      max-height: 200px;
+      overflow-y: auto;
+      margin-bottom: 10px;
+    }
+
+    .plan-banner .plan-actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .plan-banner .plan-actions button {
+      flex: 1;
+      padding: 6px 12px;
+      border-radius: 8px;
+      border: none;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .plan-banner .plan-actions .btn-approve {
+      background: var(--accent);
+      color: #2d2400;
+    }
+
+    .plan-banner .plan-actions .btn-cancel {
+      background: var(--surface2);
+      color: var(--text2);
+    }
+
+    .phase-status {
+      margin: 0 16px 8px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-size: 12px;
+      display: none;
+    }
+
+    .phase-status .phase-header {
+      font-weight: 600;
+      color: var(--accent2);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 6px;
+    }
+
+    .phase-status .phase-state {
+      margin-left: auto;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.3px;
+      text-transform: uppercase;
+      padding: 2px 6px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      color: var(--text2);
+      background: var(--surface2);
+    }
+
+    .phase-status .phase-state.ready {
+      color: #123f2f;
+      background: color-mix(in srgb, var(--success) 26%, var(--surface));
+      border-color: color-mix(in srgb, var(--success) 45%, var(--border));
+    }
+
+    .phase-status .phase-title {
+      color: var(--text);
+      margin-bottom: 4px;
+      font-weight: 500;
+    }
+
+    .phase-status .phase-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 6px;
+      color: var(--text2);
+      font-size: 11px;
+    }
+
+    .phase-status .phase-chip {
+      padding: 2px 6px;
+      border-radius: 999px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+    }
+
+    .phase-status .phase-chip.pending {
+      color: var(--text2);
+    }
+
+    .phase-status .phase-chip.ready {
+      color: #123f2f;
+      background: color-mix(in srgb, var(--success) 28%, var(--surface));
+      border-color: color-mix(in srgb, var(--success) 45%, var(--border));
+    }
+
+    .phase-status .phase-replan {
+      margin-top: 6px;
+      color: var(--text2);
+      font-size: 11px;
     }
 
     /* Settings view */
@@ -508,9 +771,50 @@
       font-weight: 400;
       line-height: 1.7;
       color: var(--text);
-      white-space: pre-wrap;
       overflow-y: auto;
       flex: 1;
+    }
+
+    .result-answer p {
+      margin: 0 0 6px;
+    }
+
+    .result-answer p:last-child {
+      margin-bottom: 0;
+    }
+
+    .result-answer br {
+      display: block;
+      margin: 2px 0;
+      content: "";
+    }
+
+    .result-answer strong {
+      color: var(--accent2);
+      font-weight: 600;
+    }
+
+    .result-answer em {
+      font-style: italic;
+      opacity: 0.9;
+    }
+
+    .result-answer code {
+      font-family: monospace;
+      font-size: 11px;
+      background: rgba(255, 255, 255, 0.1);
+      padding: 1px 5px;
+      border-radius: 4px;
+    }
+
+    .result-answer ol,
+    .result-answer ul {
+      margin: 4px 0 8px;
+      padding-left: 20px;
+    }
+
+    .result-answer li {
+      margin-bottom: 3px;
     }
 
     /* Collapsible log */
@@ -631,7 +935,7 @@
     .tier-group {
       border: 1px solid var(--border);
       border-radius: 12px;
-      padding: 12px;
+      padding: 0;
       margin-bottom: 12px;
       transition: border-color 0.2s;
     }
@@ -641,11 +945,58 @@
       background: rgba(212, 162, 78, 0.08);
     }
 
+    .tier-group>summary {
+      padding: 12px;
+      cursor: pointer;
+      list-style: none;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      user-select: none;
+      border-radius: 12px;
+      transition: background 0.12s;
+    }
+
+    .tier-group>summary:hover {
+      background: rgba(255, 255, 255, 0.03);
+    }
+
+    .tier-group>summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .tier-group>summary::marker {
+      display: none;
+      content: '';
+    }
+
+    .tier-group .tier-arrow {
+      width: 0;
+      height: 0;
+      border-style: solid;
+      border-width: 4px 0 4px 6px;
+      border-color: transparent transparent transparent var(--text2);
+      flex-shrink: 0;
+      transition: transform 0.18s;
+    }
+
+    .tier-group[open] .tier-arrow {
+      transform: rotate(90deg);
+    }
+
+    .tier-group.active .tier-arrow {
+      border-left-color: var(--accent);
+    }
+
+    .tier-group .tier-body {
+      padding: 0 12px 12px;
+    }
+
     .tier-header {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-bottom: 8px;
+      flex: 1;
     }
 
     .tier-header h3 {
@@ -653,6 +1004,10 @@
       font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 0.5px;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      margin: 0;
     }
 
     .tier-header .tier-desc {
@@ -680,7 +1035,7 @@
       color: #2d2400;
     }
 
-    .tier-group.active .tier-activate-btn {
+    .provider-card.active .tier-activate-btn {
       background: var(--accent);
       border-color: var(--accent);
       color: #2d2400;
@@ -726,19 +1081,61 @@
       gap: 10px;
     }
 
+    .help-intro {
+      font-size: 12px;
+      color: var(--text2);
+      line-height: 1.6;
+      margin-bottom: 14px;
+    }
+
     .help-card {
       background: var(--surface);
       border: 1px solid var(--border);
       border-radius: 10px;
-      padding: 12px;
+      padding: 0;
     }
 
-    .help-card h3 {
-      margin: 0 0 6px 0;
-      font-size: 12px;
-      color: var(--accent2);
-      text-transform: uppercase;
-      letter-spacing: 0.4px;
+    .help-card summary {
+      padding: 11px 12px;
+      cursor: pointer;
+      list-style: none;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      user-select: none;
+      border-radius: 10px;
+      transition: background 0.12s;
+    }
+
+    .help-card summary:hover {
+      background: rgba(255, 255, 255, 0.03);
+    }
+
+    .help-card summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .help-card summary::marker {
+      display: none;
+      content: '';
+    }
+
+    .help-card .card-arrow {
+      width: 0;
+      height: 0;
+      border-style: solid;
+      border-width: 4px 0 4px 6px;
+      border-color: transparent transparent transparent var(--text2);
+      flex-shrink: 0;
+      transition: transform 0.18s;
+    }
+
+    .help-card[open] .card-arrow {
+      transform: rotate(90deg);
+    }
+
+    .help-card .card-body {
+      padding: 0 12px 12px;
     }
 
     .help-card p {
@@ -753,6 +1150,215 @@
       color: var(--text2);
       margin-top: 4px;
     }
+
+    .help-card h3 {
+      margin: 0;
+      font-size: 11px;
+      color: var(--text);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      flex: 1;
+    }
+
+    .help-card h3 .i {
+      color: var(--text);
+      flex-shrink: 0;
+    }
+
+    .help-item {
+      font-size: 12px;
+      color: var(--text);
+      line-height: 1.55;
+      margin-bottom: 5px;
+      padding-left: 1px;
+    }
+
+    .help-item:last-child {
+      margin-bottom: 0;
+    }
+
+    .help-item b {
+      color: var(--text);
+      font-weight: 600;
+    }
+
+    .help-item .hi-desc {
+      color: var(--text2);
+      font-weight: 400;
+    }
+
+    /* Safety card — visually distinct */
+    .help-card.safety-card {
+      border-color: rgba(0, 184, 148, 0.35);
+      background: rgba(0, 184, 148, 0.06);
+    }
+
+    .help-card.safety-card h3 {
+      color: var(--text);
+    }
+
+    .help-card.safety-card h3 .i {
+      color: var(--text);
+    }
+
+    .help-card.safety-card .card-arrow {
+      border-left-color: var(--success);
+    }
+
+    .help-card.safety-card .help-item b {
+      color: var(--success);
+    }
+
+    /* Suggestion chips in empty state */
+    .suggestion-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      justify-content: center;
+      max-width: 280px;
+      margin-top: 8px;
+    }
+
+    .suggestion-chip {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      color: var(--text);
+      font-size: 11px;
+      padding: 5px 10px;
+      cursor: pointer;
+      transition: all 0.15s;
+      font-family: inherit;
+      text-align: left;
+    }
+
+    .suggestion-chip:hover {
+      border-color: var(--accent);
+      color: var(--accent2);
+      background: rgba(212, 162, 78, 0.08);
+    }
+
+    /* Settings extra sections */
+    .settings-section {
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px;
+      margin-bottom: 12px;
+    }
+
+    .settings-section h3 {
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 10px;
+      color: var(--text2);
+    }
+
+    .blocklist-item,
+    .schedule-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 5px 0;
+      font-size: 12px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .blocklist-item:last-child,
+    .schedule-item:last-child {
+      border-bottom: none;
+    }
+
+    .del-btn {
+      background: none;
+      border: none;
+      color: var(--text2);
+      cursor: pointer;
+      font-size: 13px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      transition: color 0.15s;
+    }
+
+    .del-btn:hover {
+      color: var(--error);
+    }
+
+    .add-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 8px;
+    }
+
+    .add-row input,
+    .add-row select {
+      width: auto;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0 8px;
+      color: var(--text);
+      font-size: 11px;
+      font-family: inherit;
+      outline: none;
+      box-sizing: border-box;
+      height: 28px;
+      margin-bottom: 0;
+    }
+
+    .add-row input {
+      flex: 1;
+    }
+
+    .add-row select {
+      flex: none;
+    }
+
+    .add-row input:focus {
+      border-color: var(--accent);
+    }
+
+    .add-row button {
+      -webkit-appearance: none;
+      appearance: none;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 6px;
+      padding: 0 10px;
+      cursor: pointer;
+      font-size: 11px;
+      font-family: inherit;
+      line-height: 1;
+      margin: 0;
+      height: 28px;
+      box-sizing: border-box;
+      transition: all 0.15s;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    .add-row button:hover {
+      border-color: var(--accent);
+      background: var(--accent);
+      color: #2d2400;
+    }
+
+    .schedule-meta {
+      font-size: 10px;
+      color: var(--text2);
+      margin-left: 8px;
+    }
+
   </style>
 </head>
 
@@ -762,10 +1368,12 @@
     <h1>
       <span class="dot" id="statusDot"></span>
       Browser Agent
+      <span class="context-badge" id="contextBudgetBadge"></span>
     </h1>
     <div class="header-actions">
-      <button class="icon-btn" id="btnHistory" title="History"><span class="i i-clipboard"></span></button>
-      <button class="icon-btn" id="btnHelp" title="Help"><span class="i i-info"></span></button>
+      <button class="icon-btn" id="btnHistory" title="Task History"><span class="i i-clipboard"></span></button>
+      <button class="icon-btn" id="btnSchedule" title="Scheduled Tasks"><span class="i i-clock"></span></button>
+      <button class="icon-btn" id="btnHelp" title="Capabilities"><span class="i i-info"></span></button>
       <button class="icon-btn" id="btnSettings" title="Settings"><span class="i i-settings"></span></button>
     </div>
   </div>
@@ -774,18 +1382,28 @@
   <div class="view active" id="chatView">
     <div class="steps-container" id="stepsContainer">
       <div class="empty-state" id="emptyState">
-        <span class="i i-globe i-xl" style="opacity:0.5"></span>
-        <p>Tell me what to do on this page. I'll navigate, click, fill forms and extract data.</p>
+        <img src="../../icons/icon48.png" alt="Browser Agent" width="40" height="40" style="opacity:0.85">
+        <p>I'll click, type and navigate for you.</p>
       </div>
     </div>
 
     <div class="result-banner" id="resultBanner"></div>
+  <div class="phase-status" id="phaseStatus"></div>
+    <div class="plan-banner" id="planBanner" style="display:none;"></div>
 
     <div class="input-area">
+      <div id="shortcutsDropdown" class="shortcuts-dropdown" style="display:none;"></div>
       <div class="input-row">
-        <textarea id="goalInput" placeholder="e.g. Search for 'AI agents' on Google and open the first result"
-          rows="1"></textarea>
+        <textarea id="goalInput" placeholder="Type a goal..." rows="1"></textarea>
         <button class="send-btn" id="sendBtn" title="Run"><span class="i i-play"></span></button>
+      </div>
+      <div class="input-actions">
+        <button class="icon-btn" id="btnSaveShortcut" data-tooltip="Save as shortcut"><span
+            class="i i-bookmark"></span></button>
+        <button class="icon-btn" id="btnPlanMode" data-tooltip="Plan mode — ask before acting"><span
+            class="i i-list-checks"></span></button>
+        <button class="icon-btn" id="btnNotionSave" data-tooltip="Save to Notion"><span
+            class="i i-notion"></span></button>
       </div>
     </div>
   </div>
@@ -797,6 +1415,10 @@
         <h2 style="margin:0;">Task History</h2>
         <button class="icon-btn" id="btnHistoryBack" title="Back"><span class="i i-x"></span></button>
       </div>
+      <div style="display:flex;justify-content:flex-end;margin-bottom:8px;">
+        <button id="btnClearTelemetry" class="test-btn" style="margin:0;">Clear warnings</button>
+      </div>
+      <div id="historyTelemetry" style="display:none;margin-bottom:10px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface);font-size:11px;color:var(--text2);"></div>
       <div id="historyList"></div>
       <div style="text-align:center;color:var(--text2);font-size:11px;margin-top:12px;" id="historyEmpty">No tasks yet
       </div>
@@ -806,12 +1428,33 @@
   <!-- Settings View -->
   <div class="view" id="settingsView">
     <div class="settings" id="settingsContainer">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
         <h2 style="margin:0;">Settings</h2>
         <button class="icon-btn" id="btnBack" title="Back"><span class="i i-x"></span></button>
       </div>
 
+      <p class="help-intro">Even agents need a brain. Pick one below, add your API key and hit Test. Prices shown are
+        approximate and may not reflect current rates.</p>
+
       <div id="tierGroups"></div>
+
+      <hr style="margin:20px 0 14px;border:none;border-top:1px solid var(--border);">
+      <h3 style="margin:0 0 4px;font-size:13px;">Site Blocklist</h3>
+      <p class="help-intro" style="margin:0 0 8px;">Block sites the agent should never visit. Crypto/payment blocked by default.</p>
+      <div id="blocklistSection"></div>
+    </div>
+  </div>
+
+  <!-- Schedule View -->
+  <div class="view" id="scheduleView">
+    <div class="settings">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+        <h2 style="margin:0;">Scheduled Tasks</h2>
+        <button class="icon-btn" id="btnScheduleBack" title="Back"><span class="i i-x"></span></button>
+      </div>
+      <p class="help-intro">Schedule recurring tasks — every 30 min, hourly, or daily. Runs in background, notifies when
+        done.</p>
+      <div id="scheduledTasksSection"></div>
     </div>
   </div>
 
@@ -823,32 +1466,119 @@
         <button class="icon-btn" id="btnHelpBack" title="Back"><span class="i i-x"></span></button>
       </div>
 
+      <p class="help-intro">Describe your goal — the agent handles the rest.</p>
+
       <div class="help-grid">
-        <div class="help-card">
-          <h3>Navigation and Actions</h3>
-          <p>Open websites, click elements, type text, submit forms, hover, scroll, and use keyboard shortcuts. Advanced pointer tools are available for right-click, double/triple click, coordinate click, and drag interactions.</p>
-        </div>
 
-        <div class="help-card">
-          <h3>Reading and Search</h3>
-          <p>Understand pages with accessibility tree reading, full text extraction, element search by natural language, and Ctrl+F style text search with next/previous match navigation.</p>
-        </div>
+        <!-- 1. Safety first — builds trust -->
+        <details class="help-card safety-card">
+          <summary>
+            <span class="card-arrow"></span>
+            <h3><span class="i i-shield i-lg"></span> Safety &amp; Permissions</h3>
+          </summary>
+          <div class="card-body">
+            <div class="help-item"><b>Script sandboxing</b> <span class="hi-desc">— JS is filtered: no cookies, auth
+                headers, or storage access</span></div>
+            <div class="help-item"><b>Per-domain JS permission</b> <span class="hi-desc">— agent asks before running
+                scripts on new sites</span></div>
+            <div class="help-item"><b>Site blocklist</b> <span class="hi-desc">— block navigation to sensitive domains
+                (banks, crypto, payments)</span></div>
+            <div class="help-item"><b>Pause on sensitive actions</b> <span class="hi-desc">— login, CAPTCHA, payment
+                pages pause for your manual input</span></div>
+          </div>
+        </details>
 
-        <div class="help-card">
-          <h3>Complex Browser Control</h3>
-          <p>Work across tabs and frames, take screenshots (vision-capable providers), upload files to file inputs, and inspect download status.</p>
-        </div>
+        <!-- 2. Core workflow — what users do most -->
+        <details class="help-card">
+          <summary>
+            <span class="card-arrow"></span>
+            <h3><span class="i i-list-checks i-lg"></span> Automation &amp; Workflow</h3>
+          </summary>
+          <div class="card-body">
+            <div class="help-item"><b>Plan mode</b> <span class="hi-desc">— agent shows steps before executing, you
+                approve or cancel</span></div>
+            <div class="help-item"><b>Shortcuts</b> <span class="hi-desc">— save prompts as <code
+                  style="font-size:10px;color:var(--accent2)">/name</code> slash commands for quick reuse</span></div>
+            <div class="help-item"><b>Scheduled tasks</b> <span class="hi-desc">— run goals automatically every N
+                minutes / hours</span></div>
+            <div class="help-item"><b>Background workflows</b> <span class="hi-desc">— task continues even when side
+                panel is closed</span></div>
+            <div class="help-item"><b>Smart suggestions</b> <span class="hi-desc">— contextual prompts based on the
+                current site</span></div>
+            <div class="help-item"><b>Notifications</b> <span class="hi-desc">— desktop alerts when a task
+                finishes</span></div>
+          </div>
+        </details>
 
-        <div class="help-card">
-          <h3>Safety and Reliability</h3>
-          <p>Sensitive actions require confirmation logic. JavaScript execution is filtered by security rules. If login or CAPTCHA is detected, the agent pauses and waits for manual resume.</p>
-        </div>
+        <!-- 3. Browsing -->
+        <details class="help-card">
+          <summary>
+            <span class="card-arrow"></span>
+            <h3><span class="i i-globe i-lg"></span> Browsing &amp; Navigation</h3>
+          </summary>
+          <div class="card-body">
+            <div class="help-item"><b>URLs &amp; history</b> <span class="hi-desc">— open any URL, go back / forward,
+                reload</span></div>
+            <div class="help-item"><b>Tabs</b> <span class="hi-desc">— open, close, switch and list tabs; agent tabs
+                auto-grouped</span></div>
+            <div class="help-item"><b>Iframes</b> <span class="hi-desc">— switch between frames within a page</span>
+            </div>
+            <div class="help-item"><b>Text search</b> <span class="hi-desc">— Ctrl+F style search with next / previous
+                navigation</span></div>
+          </div>
+        </details>
 
-        <div class="help-card">
-          <h3>Providers and Modes</h3>
-          <p>Choose a model provider in Settings, test connectivity, and switch active tier. The header badge shows the active operating mode/provider profile.</p>
-          <p class="help-note">Tip: Use short, specific goals for faster and more accurate execution.</p>
-        </div>
+        <!-- 4. Interaction -->
+        <details class="help-card">
+          <summary>
+            <span class="card-arrow"></span>
+            <h3><span class="i i-mouse i-lg"></span> Page Interaction</h3>
+          </summary>
+          <div class="card-body">
+            <div class="help-item"><b>Clicks</b> <span class="hi-desc">— click, double-click, right-click, middle-click,
+                triple-click</span></div>
+            <div class="help-item"><b>Forms</b> <span class="hi-desc">— type text, fill inputs, select dropdowns, upload
+                files</span></div>
+            <div class="help-item"><b>Advanced input</b> <span class="hi-desc">— drag &amp; drop, scroll, hover,
+                coordinate clicks</span></div>
+            <div class="help-item"><b>Keyboard</b> <span class="hi-desc">— shortcuts, hold keys, hotkey combos</span>
+            </div>
+          </div>
+        </details>
+
+        <!-- 5. Reading -->
+        <details class="help-card">
+          <summary>
+            <span class="card-arrow"></span>
+            <h3><span class="i i-eye i-lg"></span> Page Reading &amp; Inspection</h3>
+          </summary>
+          <div class="card-body">
+            <div class="help-item"><b>Accessibility tree</b> <span class="hi-desc">— structured reading of page
+                elements</span></div>
+            <div class="help-item"><b>Full text extraction</b> <span class="hi-desc">— get all text content from the
+                page</span></div>
+            <div class="help-item"><b>Element search</b> <span class="hi-desc">— find elements by natural language
+                description</span></div>
+            <div class="help-item"><b>Screenshots</b> <span class="hi-desc">— visual capture (with vision-capable
+                providers)</span></div>
+            <div class="help-item"><b>Dev tools</b> <span class="hi-desc">— read console logs, inspect network, check
+                downloads</span></div>
+          </div>
+        </details>
+
+        <!-- 6. Integrations -->
+        <details class="help-card">
+          <summary>
+            <span class="card-arrow"></span>
+            <h3><span class="i i-cloud i-lg"></span> External Integrations</h3>
+          </summary>
+          <div class="card-body">
+            <div class="help-item"><b><code style="font-size:10px;color:var(--accent2)">http_request</code></b> <span
+                class="hi-desc">— call any REST API directly: Notion, Slack, Airtable, Google Sheets, webhooks&hellip;
+                No CORS restrictions.</span></div>
+          </div>
+        </details>
+
       </div>
     </div>
   </div>

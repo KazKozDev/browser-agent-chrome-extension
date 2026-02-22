@@ -1,6 +1,7 @@
+import { FireworksProvider } from './fireworks.js';
+import { GeneralApiProvider } from './general-api.js';
 import { GroqProvider } from './groq.js';
 import { OllamaProvider } from './ollama.js';
-import { SiliconFlowProvider } from './siliconflow.js';
 
 /**
  * Provider Manager
@@ -12,31 +13,73 @@ import { SiliconFlowProvider } from './siliconflow.js';
  */
 
 const PROVIDER_CLASSES = {
-  siliconflow: SiliconFlowProvider,
+  fireworks: FireworksProvider,
+  generalapi: GeneralApiProvider,
   groq: GroqProvider,
   ollama: OllamaProvider,
 };
 
 const DEFAULT_CONFIG = {
-  primary: 'groq',
+  primary: 'ollama',
   fallbackOrder: [],
+  agentPolicy: {
+    replanIntervalSteps: 8,
+    replanErrorStreak: 2,
+    phaseMinEvidenceScore: 2,
+    phaseMinObservations: 1,
+    newsMinItems: 3,
+    stepMaxTokens: 320,
+    planMaxTokens: 256,
+    disableThinking: true,
+    stepTemperature: 0,
+  },
   providers: {
-    siliconflow: {
+    fireworks: {
       apiKey: '',
-      baseUrl: 'https://api.siliconflow.com/v1',
-      model: 'zai-org/GLM-4.6V',
+      baseUrl: 'https://api.fireworks.ai/inference/v1',
+      model: 'accounts/fireworks/models/kimi-k2p5',
+    },
+    generalapi: {
+      apiKey: '',
+      baseUrl: 'https://api.z.ai/api/paas/v4',
+      model: 'GLM-4.5V',
     },
     groq: {
       apiKey: '',
       baseUrl: 'https://api.groq.com/openai/v1',
-      model: 'meta-llama/llama-4-scout-17b-16e-instruct',
+      model: 'meta-llama/llama-4-maverick-17b-128e-instruct',
     },
     ollama: {
       baseUrl: 'http://localhost:11434/v1',
       model: 'qwen3-vl:8b',
+      maxTokens: 256,
+      temperature: 0.7,
+      topP: 0.8,
+      topK: 20,
+      presencePenalty: 1.5,
+      repeatPenalty: 1.0,
+      numCtx: 16384,
+      requestTimeoutMs: 180000,
     },
   },
 };
+
+const WARN_THROTTLE_MS = 10000;
+const warnTimestamps = new Map();
+
+function debugWarn(context, err) {
+  const key = String(context || 'unknown');
+  const now = Date.now();
+  const last = warnTimestamps.get(key) || 0;
+  if (now - last < WARN_THROTTLE_MS) return;
+  warnTimestamps.set(key, now);
+  const message = err?.message || String(err || 'unknown error');
+  console.warn(`[ProviderManager] ${key}: ${message}`);
+}
+
+function shouldLogStorageWarning() {
+  return typeof chrome !== 'undefined' && !!chrome?.storage?.local;
+}
 
 export class ProviderManager {
   constructor() {
@@ -55,8 +98,10 @@ export class ProviderManager {
       if (stored.providerConfig) {
         this.config = { ...DEFAULT_CONFIG, ...stored.providerConfig };
       }
-    } catch {
-      // Running outside extension context (tests)
+    } catch (err) {
+      if (shouldLogStorageWarning()) {
+        debugWarn('init.loadProviderConfig', err);
+      }
     }
     this._sanitizeConfig();
     this._buildProviders();
@@ -68,6 +113,23 @@ export class ProviderManager {
     // Fallbacks disabled by design.
     this.config.fallbackOrder = [];
 
+    const legacySiliconFlow = this.config.providers?.siliconflow;
+    if (legacySiliconFlow && !this.config.providers?.generalapi) {
+      this.config.providers = {
+        ...(this.config.providers || {}),
+        generalapi: {
+          apiKey: legacySiliconFlow.apiKey || '',
+          baseUrl: 'https://api.z.ai/api/paas/v4',
+          model: legacySiliconFlow.model === 'Qwen/Qwen3-VL-32B-Instruct'
+            ? 'GLM-4.5V'
+            : (legacySiliconFlow.model || 'GLM-4.5V'),
+        },
+      };
+    }
+    if (this.config.primary === 'siliconflow') {
+      this.config.primary = 'generalapi';
+    }
+
     // Keep only currently supported providers in config.
     const allowed = new Set(Object.keys(PROVIDER_CLASSES));
     const mergedProviders = { ...DEFAULT_CONFIG.providers, ...(this.config.providers || {}) };
@@ -75,16 +137,63 @@ export class ProviderManager {
       Object.entries(mergedProviders).filter(([name]) => allowed.has(name)),
     );
 
-    // Migrate SiliconFlow endpoint to .com (some keys are region-bound and fail on .cn).
-    if (this.config.providers.siliconflow?.baseUrl === 'https://api.siliconflow.cn/v1') {
-      this.config.providers.siliconflow.baseUrl = 'https://api.siliconflow.com/v1';
+    // Normalize provider configs: prevent empty model/baseUrl values from UI edits.
+    for (const [name, providerConf] of Object.entries(this.config.providers)) {
+      const defaults = DEFAULT_CONFIG.providers[name] || {};
+      const currentModel = String(providerConf.model || '').trim();
+      if (!currentModel && defaults.model) {
+        providerConf.model = defaults.model;
+      } else if (currentModel) {
+        providerConf.model = currentModel;
+      }
+
+      if (typeof providerConf.baseUrl === 'string' || typeof defaults.baseUrl === 'string') {
+        const rawUrl = String(providerConf.baseUrl || defaults.baseUrl || '').trim();
+        providerConf.baseUrl = rawUrl.replace(/\/+$/, '');
+      }
     }
-    if (this.config.providers.siliconflow?.model === 'Qwen/Qwen3-VL-32B-Instruct') {
-      this.config.providers.siliconflow.model = 'zai-org/GLM-4.6V';
+
+    if (this.config.providers.generalapi) {
+      this.config.providers.generalapi.baseUrl = (this.config.providers.generalapi.baseUrl || 'https://api.z.ai/api/paas/v4').replace(/\/+$/, '');
+      const currentModel = String(this.config.providers.generalapi.model || '').trim();
+      if (!currentModel) {
+        this.config.providers.generalapi.model = 'GLM-4.5V';
+      } else {
+        this.config.providers.generalapi.model = currentModel;
+      }
     }
 
     if (!allowed.has(this.config.primary)) {
       this.config.primary = DEFAULT_CONFIG.primary;
+    }
+
+    const incomingPolicy = this.config.agentPolicy || {};
+    this.config.agentPolicy = {
+      ...DEFAULT_CONFIG.agentPolicy,
+      ...(typeof incomingPolicy === 'object' && incomingPolicy ? incomingPolicy : {}),
+    };
+
+    // Clamp policy values to safe bounds.
+    this.config.agentPolicy.replanIntervalSteps = Math.min(Math.max(Number(this.config.agentPolicy.replanIntervalSteps) || DEFAULT_CONFIG.agentPolicy.replanIntervalSteps, 3), 30);
+    this.config.agentPolicy.replanErrorStreak = Math.min(Math.max(Number(this.config.agentPolicy.replanErrorStreak) || DEFAULT_CONFIG.agentPolicy.replanErrorStreak, 1), 6);
+    this.config.agentPolicy.phaseMinEvidenceScore = Math.min(Math.max(Number(this.config.agentPolicy.phaseMinEvidenceScore) || DEFAULT_CONFIG.agentPolicy.phaseMinEvidenceScore, 1), 6);
+    this.config.agentPolicy.phaseMinObservations = Math.min(Math.max(Number(this.config.agentPolicy.phaseMinObservations) || DEFAULT_CONFIG.agentPolicy.phaseMinObservations, 1), 4);
+    this.config.agentPolicy.newsMinItems = Math.min(Math.max(Number(this.config.agentPolicy.newsMinItems) || DEFAULT_CONFIG.agentPolicy.newsMinItems, 2), 8);
+    this.config.agentPolicy.stepMaxTokens = Math.min(Math.max(Number(this.config.agentPolicy.stepMaxTokens) || DEFAULT_CONFIG.agentPolicy.stepMaxTokens, 64), 1024);
+    this.config.agentPolicy.planMaxTokens = Math.min(Math.max(Number(this.config.agentPolicy.planMaxTokens) || DEFAULT_CONFIG.agentPolicy.planMaxTokens, 64), 1024);
+    this.config.agentPolicy.disableThinking = this.config.agentPolicy.disableThinking !== false;
+    this.config.agentPolicy.stepTemperature = Math.min(Math.max(Number(this.config.agentPolicy.stepTemperature) || 0, 0), 1);
+
+    if (this.config.providers.ollama) {
+      const ollama = this.config.providers.ollama;
+      ollama.maxTokens = Math.min(Math.max(Number(ollama.maxTokens) || DEFAULT_CONFIG.providers.ollama.maxTokens, 64), 1024);
+      ollama.temperature = Math.min(Math.max(Number(ollama.temperature) || 0, 0), 1);
+      ollama.topP = Math.min(Math.max(Number(ollama.topP) || DEFAULT_CONFIG.providers.ollama.topP, 0), 1);
+      ollama.topK = Math.min(Math.max(Math.round(Number(ollama.topK) || DEFAULT_CONFIG.providers.ollama.topK), 1), 100);
+      ollama.presencePenalty = Math.min(Math.max(Number(ollama.presencePenalty) || DEFAULT_CONFIG.providers.ollama.presencePenalty, 0), 2);
+      ollama.repeatPenalty = Math.min(Math.max(Number(ollama.repeatPenalty) || DEFAULT_CONFIG.providers.ollama.repeatPenalty, 0.8), 2);
+      ollama.numCtx = Math.min(Math.max(Number(ollama.numCtx) || DEFAULT_CONFIG.providers.ollama.numCtx, 2048), 32768);
+      ollama.requestTimeoutMs = Math.min(Math.max(Number(ollama.requestTimeoutMs) || DEFAULT_CONFIG.providers.ollama.requestTimeoutMs, 30000), 600000);
     }
   }
 
@@ -146,8 +255,10 @@ export class ProviderManager {
     this.statusCache = { ts: 0, data: null };
     try {
       await chrome.storage.local.set({ providerConfig: this.config });
-    } catch {
-      // Outside extension context
+    } catch (err) {
+      if (shouldLogStorageWarning()) {
+        debugWarn('updateConfig.persistProviderConfig', err);
+      }
     }
   }
 
@@ -169,7 +280,9 @@ export class ProviderManager {
       if (hasKey) {
         try {
           available = await provider.isAvailable();
-        } catch { /* noop */ }
+        } catch (err) {
+          debugWarn(`getStatus.isAvailable.${name}`, err);
+        }
       }
       status[name] = {
         configured: hasKey,
@@ -187,31 +300,48 @@ export class ProviderManager {
    */
   static getProviderInfo() {
     return {
-      siliconflow: {
-        label: 'GLM-4.6V',
-        pricing: '$0.30 / $0.90 per 1M tokens',
+      fireworks: {
+        label: 'Kimi K2.5',
+        pricing: '$0.60 in / $3.00 out',
+        costPerMTokenIn: 0.60,
+        costPerMTokenOut: 3.00,
         vision: true,
         tools: true,
-        signupUrl: 'https://cloud.siliconflow.com/',
-        note: 'SOTA visual model with native tool calls. 131K context.',
+        signupUrl: 'https://fireworks.ai/account/api-keys',
+        note: 'Flagship agentic model with thinking mode. 262K context.',
         tier: 'recommended',
       },
       groq: {
-        label: 'Llama 4 Scout',
-        pricing: '$0.11 / $0.34 per 1M tokens',
+        label: 'Llama 4 Maverick',
+        pricing: '$0.20 in / $0.60 out',
+        costPerMTokenIn: 0.20,
+        costPerMTokenOut: 0.60,
         vision: true,
         tools: true,
-        signupUrl: 'https://console.groq.com/',
-        note: 'Budget option. Vision + tools, fast inference.',
+        signupUrl: 'https://console.groq.com/keys',
+        note: 'Fast Groq inference. 17Bx128E MoE, 128K context.',
         tier: 'budget',
+      },
+      generalapi: {
+        label: 'GLM-4.xV',
+        pricing: 'Free',
+        costPerMTokenIn: 0,
+        costPerMTokenOut: 0,
+        vision: true,
+        tools: true,
+        signupUrl: 'https://api.z.ai/',
+        note: 'z.ai General API endpoint (OpenAI-compatible). Supports user-selected GLM vision models such as GLM-4.5V / GLM-4.6V-Flash / GLM-4.7-Flash. For coding-only scenarios use https://api.z.ai/api/coding/paas/v4.',
+        tier: 'free',
       },
       ollama: {
         label: 'Ollama',
         pricing: 'Free',
+        costPerMTokenIn: 0,
+        costPerMTokenOut: 0,
         vision: true,
         tools: true,
         signupUrl: 'https://ollama.ai/',
-        note: 'Runs locally. Needs ollama serve + model pull.',
+        note: 'Fully private, no API key needed. Requires Ollama serve + model pull.',
         tier: 'free',
       },
     };

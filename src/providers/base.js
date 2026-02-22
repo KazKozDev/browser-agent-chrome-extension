@@ -2,6 +2,17 @@
  * Base LLM Provider Interface
  * All providers implement this.
  */
+const RETRY_MAX_ATTEMPTS_429 = 4;
+const RETRY_MAX_ATTEMPTS_TRANSIENT = 3;
+const RETRY_MIN_DELAY_MS = 250;
+const RETRY_MAX_DELAY_MS = 10000;
+const RECOVERED_TEXT_MAX_CHARS = 3000;
+const TOOL_CALL_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/;
+
+function isPlainObject(value) {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
 export class BaseLLMProvider {
   constructor(config = {}) {
     this.name = 'base';
@@ -35,13 +46,46 @@ export class BaseLLMProvider {
   }
 
   /**
+   * Strip internal underscore-prefixed properties (e.g. _compacted) from messages
+   * before sending to an LLM API. Some providers (Groq) reject unknown fields.
+   */
+  sanitizeMessages(messages) {
+    return messages.map((msg) => {
+      let clean = msg;
+      for (const key of Object.keys(msg)) {
+        if (key.startsWith('_')) {
+          if (clean === msg) clean = { ...msg }; // lazy shallow clone
+          delete clean[key];
+        }
+      }
+      // Also clean tool_calls items inside assistant messages
+      if (clean.role === 'assistant' && Array.isArray(clean.tool_calls)) {
+        const needsClean = clean.tool_calls.some((tc) =>
+          Object.keys(tc).some((k) => k.startsWith('_')),
+        );
+        if (needsClean) {
+          if (clean === msg) clean = { ...msg };
+          clean.tool_calls = clean.tool_calls.map((tc) => {
+            const out = {};
+            for (const [k, v] of Object.entries(tc)) {
+              if (!k.startsWith('_')) out[k] = v;
+            }
+            return out;
+          });
+        }
+      }
+      return clean;
+    });
+  }
+
+  /**
    * Build a message with image content (base64 screenshot).
    * @param {string} text - Text prompt
    * @param {string} imageBase64 - Base64-encoded image (without data: prefix)
    * @param {string} mimeType - Image MIME type
    * @returns {Object} Message object in provider's format
    */
-  buildVisionMessage(text, imageBase64, mimeType = 'image/png') {
+  buildVisionMessage(text, imageBase64, mimeType = 'image/jpeg') {
     return {
       role: 'user',
       content: [
@@ -88,7 +132,8 @@ export class BaseLLMProvider {
           name: tc.function.name,
           arguments: JSON.parse(rawArgs),
         };
-      } catch {
+      } catch (err) {
+        void err;
         return {
           id: tc.id,
           name: tc.function?.name || 'unknown',
@@ -124,7 +169,12 @@ export class BaseLLMProvider {
 
     if (!resp.ok) {
       const errText = await resp.text();
-      if (resp.status === 429 && attempt < 4) {
+      if (resp.status === 429 && attempt < RETRY_MAX_ATTEMPTS_429) {
+        const waitMs = this._extractRetryDelayMs(resp, errText, attempt);
+        await new Promise((resolve) => setTimeout(resolve, waitMs));
+        return this._request(endpoint, body, attempt + 1);
+      }
+      if (this._isTransientHttpStatus(resp.status) && attempt < RETRY_MAX_ATTEMPTS_TRANSIENT) {
         const waitMs = this._extractRetryDelayMs(resp, errText, attempt);
         await new Promise((resolve) => setTimeout(resolve, waitMs));
         return this._request(endpoint, body, attempt + 1);
@@ -143,7 +193,8 @@ export class BaseLLMProvider {
             err.providerCode = providerErr.code;
           }
         }
-      } catch {
+      } catch (err) {
+        void err;
         // Non-JSON error body
       }
       throw err;
@@ -158,18 +209,40 @@ export class BaseLLMProvider {
         timeoutErr.code = 'REQUEST_TIMEOUT';
         throw timeoutErr;
       }
+      if (this._isTransientNetworkError(err) && attempt < RETRY_MAX_ATTEMPTS_TRANSIENT) {
+        const waitMs = this._extractRetryDelayMs(null, err?.message || '', attempt);
+        await new Promise((resolve) => setTimeout(resolve, waitMs));
+        return this._request(endpoint, body, attempt + 1);
+      }
       throw err;
     } finally {
       clearTimeout(timeoutId);
     }
   }
 
+  _isTransientHttpStatus(status) {
+    const s = Number(status);
+    return s === 408 || s === 425 || s === 500 || s === 502 || s === 503 || s === 504;
+  }
+
+  _isTransientNetworkError(err) {
+    if (!err) return false;
+    const name = String(err.name || '').toLowerCase();
+    const msg = String(err.message || '').toLowerCase();
+    if (name.includes('abort')) return false;
+    if (name.includes('networkerror') || msg.includes('network error')) return true;
+    if (msg.includes('failed to fetch')) return true;
+    if (msg.includes('temporarily unavailable')) return true;
+    if (msg.includes('connection reset') || msg.includes('econnreset') || msg.includes('econnrefused')) return true;
+    return false;
+  }
+
   _extractRetryDelayMs(resp, errText, attempt) {
-    const retryAfterHeader = resp.headers.get('retry-after');
+    const retryAfterHeader = resp?.headers?.get?.('retry-after');
     if (retryAfterHeader) {
       const seconds = Number(retryAfterHeader);
       if (Number.isFinite(seconds) && seconds >= 0) {
-        return Math.min(Math.max(seconds * 1000, 250), 10000);
+        return Math.min(Math.max(seconds * 1000, RETRY_MIN_DELAY_MS), RETRY_MAX_DELAY_MS);
       }
     }
 
@@ -179,12 +252,18 @@ export class BaseLLMProvider {
       const unit = match[2].toLowerCase();
       if (Number.isFinite(val)) {
         const ms = unit === 's' ? val * 1000 : val;
-        return Math.min(Math.max(ms, 250), 10000);
+        return Math.min(Math.max(ms, RETRY_MIN_DELAY_MS), RETRY_MAX_DELAY_MS);
       }
     }
 
     // Fallback: bounded exponential backoff.
-    return Math.min(1000 * (2 ** attempt), 10000);
+    return Math.min(1000 * (2 ** attempt), RETRY_MAX_DELAY_MS);
+  }
+
+  _isValidRecoveredToolCall(name, args) {
+    if (typeof name !== 'string' || !TOOL_CALL_NAME_RE.test(name)) return false;
+    if (!isPlainObject(args)) return false;
+    return true;
   }
 
   recoverToolUseFailed(err) {
@@ -205,7 +284,8 @@ export class BaseLLMProvider {
             id: `recovered_${Date.now()}_${idx}`,
             name: c.name,
             arguments: (c.parameters && typeof c.parameters === 'object') ? c.parameters : {},
-          }));
+          }))
+          .filter((c) => this._isValidRecoveredToolCall(c.name, c.arguments));
 
         if (toolCalls.length > 0) {
           return {
@@ -218,14 +298,15 @@ export class BaseLLMProvider {
             },
           };
         }
-      } catch {
+      } catch (err) {
+        void err;
         // fall through to text recovery
       }
     }
 
     // If model produced plain text instead of a tool call, return it as assistant text.
     return {
-      text: raw.slice(0, 3000),
+      text: raw.slice(0, RECOVERED_TEXT_MAX_CHARS),
       toolCalls: [],
       usage: {},
       raw: {

@@ -10,7 +10,10 @@
     "downloads",
     "sidePanel",
     "storage",
-    "alarms"
+    "unlimitedStorage",
+    "alarms",
+    "notifications",
+    "tabGroups"
   ],
   "host_permissions": [
     "http://*/*",
