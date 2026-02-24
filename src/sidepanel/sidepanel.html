@@ -152,6 +152,30 @@
       color: var(--text);
     }
 
+    .context-badge {
+      display: none;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.3px;
+      text-transform: uppercase;
+      padding: 2px 6px;
+      border-radius: 999px;
+      border: 1px solid;
+      line-height: 1.2;
+    }
+
+    .context-badge.warning {
+      color: #2d2400;
+      background: color-mix(in srgb, var(--warning) 65%, var(--surface));
+      border-color: color-mix(in srgb, var(--warning) 85%, var(--border));
+    }
+
+    .context-badge.critical {
+      color: #fff1ee;
+      background: color-mix(in srgb, var(--error) 55%, var(--surface));
+      border-color: color-mix(in srgb, var(--error) 75%, var(--border));
+    }
+
     .header h1 .dot {
       width: 8px;
       height: 8px;
@@ -2447,6 +2471,7 @@
     <h1>
       <span class="dot" id="statusDot"></span>
       Browser Agent
+      <span class="context-badge" id="contextBudgetBadge"></span>
     </h1>
     <div class="header-actions">
       <button class="icon-btn" id="btnClose" title="Close"><span class="i i-x"></span></button>

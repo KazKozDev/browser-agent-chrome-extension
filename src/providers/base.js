@@ -45,13 +45,46 @@ export class BaseLLMProvider {
   }
 
   /**
+   * Strip internal underscore-prefixed properties (e.g. _compacted) from messages
+   * before sending to an LLM API. Some providers (Groq) reject unknown fields.
+   */
+  sanitizeMessages(messages) {
+    return messages.map((msg) => {
+      let clean = msg;
+      for (const key of Object.keys(msg)) {
+        if (key.startsWith('_')) {
+          if (clean === msg) clean = { ...msg }; // lazy shallow clone
+          delete clean[key];
+        }
+      }
+      // Also clean tool_calls items inside assistant messages
+      if (clean.role === 'assistant' && Array.isArray(clean.tool_calls)) {
+        const needsClean = clean.tool_calls.some((tc) =>
+          Object.keys(tc).some((k) => k.startsWith('_')),
+        );
+        if (needsClean) {
+          if (clean === msg) clean = { ...msg };
+          clean.tool_calls = clean.tool_calls.map((tc) => {
+            const out = {};
+            for (const [k, v] of Object.entries(tc)) {
+              if (!k.startsWith('_')) out[k] = v;
+            }
+            return out;
+          });
+        }
+      }
+      return clean;
+    });
+  }
+
+  /**
    * Build a message with image content (base64 screenshot).
    * @param {string} text - Text prompt
    * @param {string} imageBase64 - Base64-encoded image (without data: prefix)
    * @param {string} mimeType - Image MIME type
    * @returns {Object} Message object in provider's format
    */
-  buildVisionMessage(text, imageBase64, mimeType = 'image/png') {
+  buildVisionMessage(text, imageBase64, mimeType = 'image/jpeg') {
     return {
       role: 'user',
       content: [
@@ -178,14 +211,36 @@ export class BaseLLMProvider {
         timeoutErr.code = 'REQUEST_TIMEOUT';
         throw timeoutErr;
       }
+      if (this._isTransientNetworkError(err) && attempt < RETRY_MAX_ATTEMPTS_TRANSIENT) {
+        const waitMs = this._extractRetryDelayMs(null, err?.message || '', attempt);
+        await new Promise((resolve) => setTimeout(resolve, waitMs));
+        return this._request(endpoint, body, attempt + 1);
+      }
       throw err;
     } finally {
       clearTimeout(timeoutId);
     }
   }
 
+  _isTransientHttpStatus(status) {
+    const s = Number(status);
+    return s === 408 || s === 425 || s === 500 || s === 502 || s === 503 || s === 504;
+  }
+
+  _isTransientNetworkError(err) {
+    if (!err) return false;
+    const name = String(err.name || '').toLowerCase();
+    const msg = String(err.message || '').toLowerCase();
+    if (name.includes('abort')) return false;
+    if (name.includes('networkerror') || msg.includes('network error')) return true;
+    if (msg.includes('failed to fetch')) return true;
+    if (msg.includes('temporarily unavailable')) return true;
+    if (msg.includes('connection reset') || msg.includes('econnreset') || msg.includes('econnrefused')) return true;
+    return false;
+  }
+
   _extractRetryDelayMs(resp, errText, attempt) {
-    const retryAfterHeader = resp.headers.get('retry-after');
+    const retryAfterHeader = resp?.headers?.get?.('retry-after');
     if (retryAfterHeader) {
       const seconds = Number(retryAfterHeader);
       if (Number.isFinite(seconds) && seconds >= 0) {

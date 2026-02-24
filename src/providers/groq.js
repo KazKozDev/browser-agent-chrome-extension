@@ -38,7 +38,7 @@ export class GroqProvider extends BaseLLMProvider {
   async chat(messages, tools = [], options = {}) {
     const body = {
       model: this.model,
-      messages,
+      messages: this.sanitizeMessages(messages),
       max_tokens: options.maxTokens || this.maxTokens,
       temperature: options.temperature ?? this.temperature,
       stream: false,
@@ -49,7 +49,8 @@ export class GroqProvider extends BaseLLMProvider {
       body.tool_choice = options.toolChoice || 'auto';
     }
 
-    if (this.enableThinking) {
+    const allowThinking = options?.disableThinking === true ? false : this.enableThinking;
+    if (allowThinking) {
       body.extra_body = { enable_thinking: true };
     }
 

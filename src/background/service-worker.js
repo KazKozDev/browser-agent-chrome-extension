@@ -62,6 +62,46 @@ function debugWarn(context, err) {
   appendTelemetry('BG', key, message);
 }
 
+// Buffered outbound events while sidepanel is disconnected.
+const replayBuffer = [];
+const MAX_REPLAY_MESSAGES = 300;
+const NOTIFICATION_ICON_URL = chrome.runtime.getURL('icons/icon48.png');
+
+const WARN_THROTTLE_MS = 10000;
+const MAX_TELEMETRY_ITEMS = 30;
+const warnTimestamps = new Map();
+
+function appendTelemetry(source, context, message) {
+  if (!chrome?.storage?.local) return;
+  chrome.storage.local.get('diagnosticTelemetry')
+    .then(({ diagnosticTelemetry = [] }) => {
+      diagnosticTelemetry.unshift({
+        source,
+        context,
+        message,
+        timestamp: Date.now(),
+      });
+      if (diagnosticTelemetry.length > MAX_TELEMETRY_ITEMS) {
+        diagnosticTelemetry.length = MAX_TELEMETRY_ITEMS;
+      }
+      return chrome.storage.local.set({ diagnosticTelemetry });
+    })
+    .catch((err) => {
+      console.warn('[BG] telemetry.append failed:', err?.message || err);
+    });
+}
+
+function debugWarn(context, err) {
+  const key = String(context || 'unknown');
+  const now = Date.now();
+  const last = warnTimestamps.get(key) || 0;
+  if (now - last < WARN_THROTTLE_MS) return;
+  warnTimestamps.set(key, now);
+  const message = err?.message || String(err || 'unknown error');
+  console.warn(`[BG] ${key}: ${message}`);
+  appendTelemetry('BG', key, message);
+}
+
 // ===== INIT =====
 
 async function init() {

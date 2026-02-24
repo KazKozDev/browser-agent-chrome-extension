@@ -208,6 +208,332 @@ export class Agent {
     return !!this.provider.currentProvider?.supportsVision;
   }
 
+  _clampNumber(value, min, max) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return min;
+    return Math.min(Math.max(n, min), max);
+  }
+
+  _deriveContextWindow(primaryProvider, providerConf = {}) {
+    const providerName = String(primaryProvider || '').trim().toLowerCase();
+    const modelName = String(providerConf.model || this.provider?.currentProvider?.model || '').trim().toLowerCase();
+
+    if (providerName === 'ollama') {
+      const numCtx = Number(providerConf.numCtx || this.provider?.currentProvider?.numCtx || 0);
+      return Number.isFinite(numCtx) && numCtx > 0 ? numCtx : DEFAULT_CONTEXT_WINDOW_TOKENS;
+    }
+    if (providerName === 'fireworks') return 262144;
+    if (providerName === 'groq') return 128000;
+    if (providerName === 'generalapi') {
+      if (/glm[-_]?4\.[567]/i.test(modelName)) return 131072;
+      if (/^glm/i.test(modelName)) return 65536;
+      return 32768;
+    }
+    return 32768;
+  }
+
+  _configureContextBudgetFromProvider() {
+    const managerConfig = this.provider?.config || {};
+    const primary = String(managerConfig.primary || '').trim();
+    const providerConf = managerConfig.providers?.[primary] || {};
+
+    const contextWindow = this._deriveContextWindow(primary, providerConf);
+    this._contextWindowTokens = this._clampNumber(contextWindow, 2048, 1048576);
+
+    const outputReserveRaw = Number(
+      providerConf.maxTokens
+      || this.provider?.currentProvider?.maxTokens
+      || DEFAULT_RESERVED_OUTPUT_TOKENS,
+    );
+    this._contextReservedOutputTokens = this._clampNumber(outputReserveRaw, 256, 8192);
+
+    const dynamicMessageLimit = this._clampNumber(
+      Math.round(this._contextWindowTokens / 700),
+      AGENT_MAX_CONVERSATION_MESSAGES,
+      120,
+    );
+    this.maxConversationMessages = dynamicMessageLimit;
+    this._contextBudgetDynamic = true;
+  }
+
+  _estimateConversationTokens(messages) {
+    if (!Array.isArray(messages) || messages.length === 0) return 0;
+
+    let total = 0;
+    for (const msg of messages) {
+      if (!msg) continue;
+
+      total += 8;
+      if (msg.role) total += 2;
+
+      if (typeof msg.content === 'string') {
+        total += Math.ceil(msg.content.length / 4);
+      } else if (Array.isArray(msg.content)) {
+        for (const part of msg.content) {
+          if (!part) continue;
+          if (part.type === 'text') {
+            total += Math.ceil(String(part.text || '').length / 4);
+          } else if (part.type === 'image_url') {
+            total += 1200;
+          } else {
+            total += 24;
+          }
+        }
+      }
+
+      if (Array.isArray(msg.tool_calls)) {
+        total += msg.tool_calls.length * 32;
+        for (const tc of msg.tool_calls) {
+          const argsText = String(tc?.function?.arguments || '');
+          total += Math.ceil(argsText.length / 4);
+        }
+      }
+    }
+
+    return total;
+  }
+
+  _getRuntimeTokenLimit(kind = 'step') {
+    const policy = this.runtimePolicy || {};
+    if (kind === 'plan') {
+      const n = Number(policy.planMaxTokens);
+      if (Number.isFinite(n) && n > 0) return this._clampNumber(n, 64, 1024);
+      return AGENT_PLAN_MAX_TOKENS_DEFAULT;
+    }
+    const n = Number(policy.stepMaxTokens);
+    if (Number.isFinite(n) && n > 0) return this._clampNumber(n, 64, 1024);
+    return AGENT_STEP_MAX_TOKENS_DEFAULT;
+  }
+
+  _compactAssistantText(text) {
+    const raw = String(text || '').replace(/\s+/g, ' ').trim();
+    if (!raw) return '';
+    return raw.slice(0, AGENT_THOUGHT_MAX_CHARS);
+  }
+
+
+  _runtimeDisableThinking() {
+    return this.runtimePolicy?.disableThinking !== false;
+  }
+
+  _runtimeStepTemperature() {
+    const n = Number(this.runtimePolicy?.stepTemperature);
+    if (!Number.isFinite(n)) return 0;
+    return this._clampNumber(n, 0, 1);
+  }
+
+  async _readBundledTextFile(path) {
+    try {
+      const url = chrome.runtime.getURL(path);
+      const resp = await fetch(url);
+      if (!resp.ok) return '';
+      return await resp.text();
+    } catch (err) {
+      debugWarn(`skills.readFile.${path}`, err);
+      return '';
+    }
+  }
+
+  _parseSkillMarkdown(id, markdown) {
+    const text = String(markdown || '').trim();
+    if (!text) return null;
+
+    const toolsMatch = text.match(/^Allowed tools:\s*(.+)$/im);
+    const toolsRaw = toolsMatch ? toolsMatch[1].trim() : 'all';
+    const tools = /^all$/i.test(toolsRaw)
+      ? null
+      : toolsRaw.split(',').map((t) => t.trim()).filter(Boolean);
+
+    const promptMatch = text.match(/(?:^|\n)Prompt:\s*([\s\S]*)$/i);
+    const prompt = (promptMatch ? promptMatch[1] : text).trim();
+    if (!prompt) return null;
+
+    return { id, tools, prompt };
+  }
+
+  async _loadSkillsContext() {
+    if (this._skillsCache) return this._skillsCache;
+
+    const indexText = await this._readBundledTextFile('src/skills/SKILLS_INDEX.md');
+    const skills = {};
+    for (const id of SKILL_IDS) {
+      const fileName = SKILL_FILE_MAP[id];
+      if (!fileName) continue;
+      const raw = await this._readBundledTextFile(`src/skills/${fileName}`);
+      const parsed = this._parseSkillMarkdown(id, raw);
+      if (parsed) skills[id] = parsed;
+    }
+
+    if (!skills.general) {
+      skills.general = {
+        id: 'general',
+        tools: null,
+        prompt: 'Act according to the situation. Be brief and finish only when task is complete.',
+      };
+    }
+
+    this._skillsCache = { indexText, skills };
+    return this._skillsCache;
+  }
+
+  _parseSelectedSkillId(rawText = '') {
+    const text = String(rawText || '').trim().toLowerCase();
+    if (!text) return 'general';
+    const match = text.match(/(search|navigate|fill_form|extract|interact|monitor|multi_step|general)/i);
+    return match ? match[1].toLowerCase() : 'general';
+  }
+
+  async _selectSkillForGoal(goal, skillsContext) {
+    const availableIds = Object.keys(skillsContext?.skills || {}).filter((id) => id !== 'general');
+    const idsList = [...availableIds, 'general'];
+    const classifierMessages = [
+      {
+        role: 'system',
+        content: SKILL_SELECTION_PROMPT,
+      },
+      {
+        role: 'user',
+        content: `Task: ${goal}\n\nAllowed skill ids: ${idsList.join(', ')}\nReply with one skill id.`,
+      },
+    ];
+
+    try {
+      this.metrics.llmCalls += 1;
+      const response = await this.provider.chat(classifierMessages, [], {
+        maxTokens: 8,
+        temperature: 0,
+        thinking: !this._runtimeDisableThinking(),
+        disableThinking: this._runtimeDisableThinking(),
+      });
+      this._recordUsage(response?.usage);
+      return this._parseSelectedSkillId(response?.text || 'general');
+    } catch (err) {
+      debugWarn('skills.classify', err);
+      return 'general';
+    }
+  }
+
+  _resolveSkillTools(skillId, allTools) {
+    const skill = this._skillsCache?.skills?.[skillId] || this._skillsCache?.skills?.general;
+    if (!skill?.tools || !Array.isArray(skill.tools)) return allTools;
+    const allowed = new Set(skill.tools);
+    return allTools.filter((t) => allowed.has(t.name));
+  }
+
+  async _buildSkillSystemMessage(goal) {
+    const skillsContext = await this._loadSkillsContext();
+    const selectedId = await this._selectSkillForGoal(goal, skillsContext);
+    const finalId = skillsContext?.skills?.[selectedId] ? selectedId : 'general';
+    this._activeSkillId = finalId;
+    const skill = skillsContext?.skills?.[finalId] || skillsContext?.skills?.general;
+
+    this._emitStep({ step: 0, type: 'skill', content: `Skill selected: ${finalId}` });
+    return {
+      role: 'system',
+      content: `Active skill: ${finalId}\n\nSkill strategy:\n${skill.prompt}\n\nUse only tools that fit this skill unless impossible, then adapt safely.`,
+    };
+  }
+
+  _recoverToolCallsFromText(text) {
+    const raw = String(text || '').trim();
+    if (!raw) return [];
+
+    const allowedTools = new Set([...TOOLS.map((t) => t.name), 'done', 'fail']);
+    const candidates = [];
+
+    const fenceMatch = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    if (fenceMatch?.[1]) candidates.push(fenceMatch[1].trim());
+    candidates.push(raw);
+
+    const maybeAddCall = (obj) => {
+      if (!obj || typeof obj !== 'object') return;
+      const name = String(obj.name || '').trim();
+      if (!allowedTools.has(name)) return;
+      const args = (obj.arguments && typeof obj.arguments === 'object') ? obj.arguments : {};
+      recovered.push({
+        id: `recovered_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        name,
+        arguments: args,
+      });
+    };
+
+    const recovered = [];
+    for (const source of candidates) {
+      if (!source) continue;
+
+      try {
+        const parsed = JSON.parse(source);
+        if (Array.isArray(parsed)) {
+          for (const item of parsed) maybeAddCall(item);
+        } else {
+          maybeAddCall(parsed);
+        }
+      } catch {
+        const match = source.match(/\{[\s\S]*"name"\s*:\s*"[A-Za-z_][A-Za-z0-9_]*"[\s\S]*"arguments"\s*:\s*\{[\s\S]*\}\s*\}/);
+        if (!match) continue;
+        try {
+          const parsed = JSON.parse(match[0]);
+          maybeAddCall(parsed);
+        } catch {
+          // ignore malformed fragments
+        }
+      }
+      if (recovered.length > 0) break;
+    }
+
+    return recovered;
+  }
+
+  _isLikelyInformationGoal() {
+    const g = String(this._goal || '').toLowerCase();
+    if (!g) return false;
+    return /(find|search|lookup|check|what|how|which|spell|как|пишется|найд|поиск|проверь|что такое|какой)/i.test(g);
+  }
+
+  _getLastActionToolName() {
+    if (!Array.isArray(this.history) || this.history.length === 0) return '';
+    for (let i = this.history.length - 1; i >= 0; i -= 1) {
+      const item = this.history[i];
+      if (item?.type === 'action' && item?.tool) return String(item.tool);
+    }
+    return '';
+  }
+
+  _getStuckRecoveryToolNames() {
+    const lastTool = this._getLastActionToolName();
+    if (lastTool === 'read_page' || lastTool === 'get_page_text') {
+      return this._isLikelyInformationGoal()
+        ? ['find_text', 'get_page_text', 'read_page', 'done', 'computer', 'back']
+        : ['find', 'computer', 'read_page', 'done', 'back'];
+    }
+    if (lastTool === 'navigate' || lastTool === 'computer' || lastTool === 'find') {
+      return this._isLikelyInformationGoal()
+        ? ['find_text', 'read_page', 'get_page_text', 'computer', 'done', 'back']
+        : ['find', 'read_page', 'computer', 'done', 'back'];
+    }
+    return this._isLikelyInformationGoal()
+      ? ['find_text', 'get_page_text', 'read_page', 'find', 'computer', 'done', 'back']
+      : ['find', 'read_page', 'computer', 'done', 'back'];
+  }
+
+  _applyStuckToolRestriction(activeTools) {
+    if (!Array.isArray(activeTools) || this._noToolOnlyStreak < 2) return activeTools;
+    const preferred = this._getStuckRecoveryToolNames();
+    const preferredSet = new Set(preferred);
+    const filtered = activeTools.filter((t) => preferredSet.has(t.name));
+    return filtered.length > 0 ? filtered : activeTools;
+  }
+
+  _buildStuckRecoveryPrompt(activeTools = []) {
+    const allowedNames = Array.isArray(activeTools) ? activeTools.map((t) => t.name) : [];
+    const preferred = this._getStuckRecoveryToolNames().filter((n) => allowedNames.length === 0 || allowedNames.includes(n));
+    const toolList = preferred.length > 0 ? preferred.join(', ') : 'find, read_page, get_page_text, computer, done';
+    const infoTail = this._isLikelyInformationGoal()
+      ? 'You are in answer-extraction phase: use find_text/get_page_text to extract the concrete fact, then call done with answer + source URL.'
+      : 'Use one concrete action tool now, then continue.';
+    return `Stuck recovery mode: repeated text-only responses detected. Call exactly ONE native tool now, no narration. Preferred tools: ${toolList}. ${infoTail}`;
+  }
+
   /**
    * Run the agent loop for a given goal.
    */
@@ -224,6 +550,10 @@ export class Agent {
     this.history = [];
     this._scratchpad = {};
     this._lastKnownUrl = '';
+    this._lastFindResults = [];
+    this.executionPlan = null;
+    this._currentPhaseIndex = -1;
+    this.runtimePolicy = (options?.policy && typeof options.policy === 'object') ? options.policy : {};
     this.metrics = {
       startedAt: Date.now(),
       finishedAt: null,
@@ -363,9 +693,17 @@ export class Agent {
       taskMessage += '\n\nThis task is resumed from a previously interrupted session. Continue from current page state and avoid repeating already completed work.';
     }
 
+    this._configureContextBudgetFromProvider();
+
+    let taskMessage = `Task: ${goal}`;
+    if (pageContext) taskMessage += pageContext;
+
+    const selectedSkillMessage = await this._buildSkillSystemMessage(goal);
+
     const messages = [
       { role: 'system', content: this._buildSystemPrompt() },
       { role: 'user', content: taskMessage },
+      { role: 'system', content: 'State summary: no verified progress yet.' },
     ];
 
     let stepStart = 0;
@@ -447,8 +785,22 @@ export class Agent {
           this._notify('failed');
           return { success: false, reason: 'Aborted by user', steps: step, metrics: this._finalizeMetrics() };
         }
+        const phaseLabel = '';
+        if (!suppressStepBanner) {
+          this._emitStep({
+            step,
+            type: 'thought',
+            content: phaseLabel
+              ? `Step ${step + 1}/${this.maxSteps} — ${phaseLabel}`
+              : `Step ${step + 1}/${this.maxSteps}`,
+          });
+        } else {
+          suppressStepBanner = false;
+        }
+        // Phase status updates are disabled.
 
         try {
+          this._progressedThisStep = false;
           await this._pauseIfManualInterventionNeeded(step, messages);
           if (this._aborted) {
             this.status = 'failed';
@@ -459,7 +811,7 @@ export class Agent {
           // Filter tools based on provider capabilities
           let activeTools = TOOLS;
           if (!this._providerSupportsVision()) {
-            activeTools = TOOLS.filter(t => t.name !== 'screenshot');
+            activeTools = activeTools.filter(t => t.name !== 'screenshot');
           }
 
           // 1) REFLECT: mandatory reasoning pass (no tools)
@@ -485,6 +837,16 @@ export class Agent {
               type: 'error',
               error: `REFLECTION_FALLBACK: ${reflection.error || 'invalid model reflection format'}`,
             });
+            this._emitStep({
+              step,
+              type: 'warning',
+              content: 'Model returned text without tool_call. Retrying same step with strict tool-call requirement.',
+            });
+
+            // Text-only output is a non-action turn: retry immediately without counting a step.
+            suppressStepBanner = true;
+            step -= 1;
+            continue;
           }
           this._reflectionState = reflection.state;
           this.history.push({ step, type: 'thought', content: digest });
@@ -663,7 +1025,7 @@ export class Agent {
 
     this._appendMessage(messages, {
       role: 'assistant',
-      content: response.text || null,
+      content: null,
       tool_calls: assistantToolCalls.map(({ _normalized, ...tc }) => tc),
     });
 
@@ -700,6 +1062,30 @@ export class Agent {
             this.metrics.duplicateToolCalls += 1;
             duplicateNudge = `You are stuck in a loop of calling read-only tools and saving progress without taking any concrete actions. Try a DIFFERENT strategy. Open a new URL, click a link, type a search, or if you cannot find the requested information, use the fail tool to give up directly.`;
           }
+        }
+
+        // Per-domain JS permission check
+        try {
+          const tab = await chrome.tabs.get(this.tabId);
+          if (tab?.url && !tab.url.startsWith('chrome://')) {
+            const domain = new URL(tab.url).hostname;
+            if (!this.trustedJsDomains.has(domain)) {
+              const allowed = await this._waitForJsDomainApproval(domain);
+              if (!allowed || this._aborted) {
+                const result = this._makeError('JS_DOMAIN_BLOCKED', `JavaScript execution on "${domain}" was not permitted.`);
+                this.history.push({ step, type: 'action', tool: tc.name, args: normalizedArgs, result });
+                this._emitStep({ step, type: 'action', tool: tc.name, args: normalizedArgs, result });
+                this._appendMessage(messages, {
+                  role: 'tool',
+                  tool_call_id: toolCallId,
+                  content: JSON.stringify(result),
+                });
+                continue;
+              }
+            }
+          }
+        } catch (err) {
+          debugWarn('tool.javascript.readTabForDomainCheck', err);
         }
       }
 
@@ -789,6 +1175,91 @@ export class Agent {
 
       this.history.push({ step, type: 'action', tool: tc.name, args: normalizedArgs, result });
       this._emitStep({ step, type: 'action', tool: tc.name, args: normalizedArgs, result });
+      this._updateStateSummaryFromTool(tc.name, normalizedArgs, result);
+
+      const readDoneLoopGuard = this._checkReadDoneLoopGuard(step, tc.name, result);
+      if (readDoneLoopGuard?.kind === 'warn') {
+        this._appendMessage(messages, {
+          role: 'user',
+          content: readDoneLoopGuard.prompt,
+        });
+      } else if (readDoneLoopGuard?.kind === 'fail') {
+        this.status = 'failed';
+        this._notify('failed');
+        return { success: false, reason: readDoneLoopGuard.reason, steps: step + 1, metrics: this._finalizeMetrics() };
+      }
+
+      // Phase progression heuristics are disabled.
+
+      if (tc.name === 'computer' && result?.success === false) {
+        await this._attemptComputerSelfHeal(step, messages, normalizedArgs, result);
+      }
+
+      const guardedFailure = this._checkToolErrorLoopGuard(step, tc.name, result);
+      if (guardedFailure) {
+        if (guardedFailure.kind === 'recover_done_contract') {
+          this._appendMessage(messages, {
+            role: 'user',
+            content: `Recovery mode: done() has failed contract validation multiple times. Do NOT call done now. First extract concrete result with tools (read_page or get_page_text), including source URL. Then call done(summary, answer) with non-empty fields and actual data.`,
+          });
+          continue;
+        }
+        if (guardedFailure.kind === 'recover_generic') {
+          this._appendMessage(messages, {
+            role: 'user',
+            content: guardedFailure.recoveryPrompt || `Recovery mode: repeated error detected (${guardedFailure.code || 'UNKNOWN_ERROR'}). Change strategy and continue with tools.`,
+          });
+          continue;
+        }
+        this.status = 'failed';
+        this._notify('failed');
+        return { success: false, reason: guardedFailure.reason, steps: step + 1, metrics: this._finalizeMetrics() };
+      }
+
+      // Architecture rule: Only process screenshot vision correctly
+      if (tc.name === 'screenshot' && result?.success && result?.imageBase64) {
+        this._appendMessage(messages, {
+          role: 'tool',
+          tool_call_id: toolCallId,
+          content: JSON.stringify({ success: true, note: 'Screenshot captured and attached as image below.' }),
+        });
+        const currentProvider = this.provider.currentProvider;
+        if (currentProvider?.supportsVision) {
+          this._appendMessage(messages,
+            currentProvider.buildVisionMessage(
+              'Here is the screenshot of the current page. Describe what you see and decide the next action.',
+              result.imageBase64,
+              result.mimeType || 'image/jpeg',
+            ),
+          );
+        } else {
+          this._appendMessage(messages, {
+            role: 'user',
+            content: 'Screenshot was captured but cannot be displayed (text-only model). Use read_page instead.',
+          });
+        }
+      } else {
+        // Normal tool output append
+        this._appendMessage(messages, {
+          role: 'tool',
+          tool_call_id: toolCallId,
+          content: this._serializeToolResultForLLM(tc.name, result),
+        });
+        if (fallbackVisionMessage) {
+          this._appendMessage(messages, fallbackVisionMessage);
+        }
+      }
+
+      // Keep flow deterministic: do not inject heuristic strategy mutations.
+      if (tc.name === 'done' && result?.success === false) {
+        const details = Array.isArray(result?.details) && result.details.length > 0
+          ? result.details.join(' ')
+          : (Array.isArray(result?.missing) ? `Missing coverage: ${result.missing.join(', ')}` : 'Provide missing evidence and retry done.');
+        this._appendMessage(messages, {
+          role: 'user',
+          content: `Continue task. done was rejected by contract validation. Missing requirements: ${details}`,
+        });
+      }
 
       // Check terminal actions
       if (tc.name === 'done' && result?.success) {
@@ -826,12 +1297,6 @@ export class Agent {
             content: 'Screenshot was captured but cannot be displayed (text-only model). Use read_page instead.',
           });
         }
-      } else {
-        this._appendMessage(messages, {
-          role: 'tool',
-          tool_call_id: toolCallId,
-          content: this._serializeToolResultForLLM(tc.name, result),
-        });
       }
 
       if (tc.name === 'extract_structured' && result?.success) {
@@ -893,11 +1358,72 @@ export class Agent {
    */
   async _executeTool(name, args) {
     switch (name) {
-      case 'read_page':
-        return await this._sendToContent('readPage', {
+      case 'read_page': {
+        // Check observation cache (avoid redundant reads on same URL)
+        let cachedUrl = '';
+        try {
+          const tab = await chrome.tabs.get(this.tabId);
+          cachedUrl = tab?.url || '';
+        } catch { /* ignore */ }
+        if (cachedUrl && !args?.viewportOnly) {
+          const cached = this._getCachedObservation(cachedUrl);
+          if (cached) {
+            return { ...cached, fromCache: true };
+          }
+        }
+
+        const _read = async () => await this._sendToContent('readPage', {
           maxDepth: Math.min(Math.max(Number(args?.maxDepth) || 12, 1), 12),
           maxNodes: Math.min(Math.max(Number(args?.maxNodes) || 180, 20), 220),
+          viewportOnly: args?.viewportOnly === true,
         });
+
+        let res = await _read();
+
+        if (res && res.url) {
+          try {
+            const domain = new URL(res.url).hostname;
+            // Check if domain is inside pure vision list
+            if (this._containsAny(domain, PURE_VISION_DOMAINS)) {
+              res.tree = null;
+              res.interactiveCount = 0;
+              res.nodeCount = 0;
+              res.note = "PURE VISION MODE ACTIVE. DOM tree is hidden for this domain. You MUST use screenshot and computer(action, x, y) to navigate and interact.";
+            }
+          } catch (e) {
+            // Ignore URL parsing errors
+          }
+        }
+
+        if (res && res.tree && !this._aborted && !this._isWaitingForUser) {
+          const haystack = JSON.stringify(res.tree).toLowerCase();
+          if (this._containsAny(haystack, CAPTCHA_HINTS)) {
+            this._isWaitingForUser = true;
+            this.status = 'paused_waiting_user';
+            this._notify('paused_waiting_user');
+            this._emitIntervention({
+              kind: 'captcha',
+              url: res.url || '',
+              title: res.title || '',
+              message: 'CAPTCHA detected. Please solve it manually, then press Resume.',
+            });
+            await new Promise(r => { this._resumeResolver = r; });
+            this._resumeResolver = null;
+            this._isWaitingForUser = false;
+
+            if (!this._aborted) {
+              this.status = 'running';
+              this._notify('running');
+              res = await _read();
+            }
+          }
+        }
+        // Cache the result for deduplication
+        if (res && res.url && res.tree) {
+          this._setCachedObservation(res.url, res);
+        }
+        return res;
+      }
 
       case 'get_page_text':
         {
@@ -1182,6 +1708,12 @@ export class Agent {
    * Send message to content script in the active tab.
    */
   async _sendToContent(action, payload) {
+    let tabUrlBefore;
+    try {
+      const tab = await chrome.tabs.get(this.tabId);
+      tabUrlBefore = tab.url;
+    } catch (e) { }
+
     try {
       const response = await chrome.tabs.sendMessage(this.tabId, { action, payload });
       return response ?? this._makeError('EMPTY_CONTENT_RESPONSE', 'No response from content script');
@@ -1192,6 +1724,21 @@ export class Agent {
         msg.includes('Could not establish connection');
 
       if (needsInjection) {
+        // ARCHITECTURAL FIX: Check if we disconnected because the action triggered a page navigation
+        let navigated = false;
+        try {
+          const tab = await chrome.tabs.get(this.tabId);
+          if (tab.status === 'loading' || (tabUrlBefore && tab.url !== tabUrlBefore)) {
+            navigated = true;
+          }
+        } catch (e) { }
+
+        if (navigated && (action === 'executeAction' || action === 'upload_file')) {
+          // The action successfully triggered a navigation, which killed the content script.
+          // Do NOT retry the action on the new page.
+          return { success: true, description: `Executed ${payload?.type || action}, which triggered a page navigation.` };
+        }
+
         try {
           await chrome.scripting.executeScript({
             target: { tabId: this.tabId },
@@ -1212,6 +1759,7 @@ export class Agent {
    * Take a screenshot of the current tab.
    */
   async _takeScreenshot() {
+    const MAX_WIDTH = 1280;
     try {
       const dataUrl = await chrome.tabs.captureVisibleTab(null, {
         format: 'jpeg',
@@ -1262,10 +1810,18 @@ export class Agent {
           try {
             // eslint-disable-next-line no-eval
             const value = (0, eval)(source);
-            return {
-              success: true,
-              result: value !== undefined ? String(value).slice(0, 5000) : 'undefined',
-            };
+            if (value === undefined) return { success: true, result: 'undefined' };
+            if (value === null) return { success: true, result: 'null' };
+            // Serialize objects/arrays as JSON so the agent can read structured data
+            if (typeof value === 'object') {
+              try {
+                const json = JSON.stringify(value, null, 2);
+                return { success: true, result: json.slice(0, 10000) };
+              } catch {
+                return { success: true, result: String(value).slice(0, 5000) };
+              }
+            }
+            return { success: true, result: String(value).slice(0, 5000) };
           } catch (err) {
             return {
               success: false,
@@ -1284,6 +1840,7 @@ export class Agent {
 
   async _navigateHistory(direction) {
     try {
+      this._invalidateObsCache();
       await this._clearFindTextContext();
       if (direction === 'back') {
         if (typeof chrome.tabs.goBack === 'function') {
@@ -1512,34 +2069,6 @@ export class Agent {
       }
     }
     return { success: true, closedTabId: tabId, currentTabId: this.tabId };
-  }
-
-  async _getDownloadStatus(args = {}) {
-    if (!chrome.downloads || typeof chrome.downloads.search !== 'function') {
-      return this._makeError('DOWNLOADS_API_UNAVAILABLE', 'Downloads API unavailable. Add "downloads" permission in manifest.');
-    }
-
-    const state = args.state && args.state !== 'any' ? String(args.state) : undefined;
-    const limit = Math.min(Math.max(Number(args.limit) || 10, 1), 50);
-    const query = { limit };
-    if (state) query.state = state;
-
-    const items = await chrome.downloads.search(query);
-    return {
-      success: true,
-      total: items.length,
-      downloads: items.map((d) => ({
-        id: d.id,
-        state: d.state,
-        filename: d.filename || '',
-        url: d.url || '',
-        bytesReceived: d.bytesReceived || 0,
-        totalBytes: d.totalBytes || 0,
-        error: d.error || '',
-        startTime: d.startTime || '',
-        endTime: d.endTime || '',
-      })),
-    };
   }
 
   async _clearFindTextContext() {
@@ -2411,6 +2940,341 @@ export class Agent {
     return null;
   }
 
+  _finalizeOnStepLimit() {
+    return {
+      success: false,
+      reason: `Max steps reached (${this.maxSteps}) before explicit done().`,
+      steps: this.maxSteps,
+      metrics: this._finalizeMetrics(),
+    };
+  }
+
+  _validateDoneContract(summary = '', answer = '') {
+    const summaryText = String(summary || '').trim();
+    const answerText = String(answer || '').trim();
+
+    const failures = [];
+    if (!summaryText) {
+      failures.push('done() requires non-empty summary.');
+    }
+    if (!answerText) {
+      failures.push('done() requires non-empty answer.');
+    }
+
+    if (this.pageState.usedFindText && !this.pageState.hasReadContext) {
+      failures.push('done() after find_text requires context read via read_page or get_page_text before completion.');
+    }
+
+    if (failures.length > 0) {
+      return {
+        ok: false,
+        reason: `Completion rejected: ${failures.join(' ')}`,
+        details: failures,
+      };
+    }
+
+    return { ok: true, details: [] };
+  }
+
+  _repairDoneArgs(summary = '', answer = '', assistantText = '') {
+    const summaryText = String(summary || '').trim();
+    const answerText = String(answer || '').trim();
+    if (summaryText && answerText) {
+      return { repaired: false, summary: summaryText, answer: answerText };
+    }
+
+    const raw = String(assistantText || '').trim();
+    if (!raw) {
+      return { repaired: false, summary: summaryText, answer: answerText };
+    }
+
+    let parsed = null;
+    if ((raw.startsWith('{') && raw.endsWith('}')) || (raw.startsWith('[') && raw.endsWith(']'))) {
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        parsed = null;
+      }
+    }
+
+    let repairedSummary = summaryText;
+    let repairedAnswer = answerText;
+
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      if (!repairedSummary && typeof parsed.summary === 'string') {
+        repairedSummary = parsed.summary.trim();
+      }
+      if (!repairedAnswer && typeof parsed.answer === 'string') {
+        repairedAnswer = parsed.answer.trim();
+      }
+    }
+
+    if (!repairedSummary || !repairedAnswer) {
+      const summaryMatch = raw.match(/(?:^|\n)\s*summary\s*[:=-]\s*(.+)$/im);
+      const answerMatch = raw.match(/(?:^|\n)\s*answer\s*[:=-]\s*([\s\S]+)$/im);
+      if (!repairedSummary && summaryMatch?.[1]) {
+        repairedSummary = summaryMatch[1].trim();
+      }
+      if (!repairedAnswer && answerMatch?.[1]) {
+        repairedAnswer = answerMatch[1].trim();
+      }
+    }
+
+    const repaired = (!summaryText && !!repairedSummary) || (!answerText && !!repairedAnswer);
+    return {
+      repaired,
+      summary: repairedSummary,
+      answer: repairedAnswer,
+    };
+  }
+
+  _checkToolErrorLoopGuard(step, toolName, result) {
+    const normalizedTool = String(toolName || '').trim().toLowerCase();
+
+    // fail() is a terminal explicit decision; do not intercept it with loop recovery.
+    if (normalizedTool === 'fail') {
+      return null;
+    }
+
+    if (!result || result.success !== false) {
+      this._lastToolErrorCode = '';
+      this._sameToolErrorCount = 0;
+      if (normalizedTool === 'computer') {
+        this._computerErrorCode = '';
+        this._computerErrorCount = 0;
+      }
+      return null;
+    }
+
+    const code = String(result.code || result.error || 'UNKNOWN_TOOL_ERROR').trim();
+    if (!code) {
+      this._lastToolErrorCode = '';
+      this._sameToolErrorCount = 0;
+      if (normalizedTool === 'computer') {
+        this._computerErrorCode = '';
+        this._computerErrorCount = 0;
+      }
+      return null;
+    }
+
+    // done() contract failures are recoverable: activate correction mode instead of hard fail.
+    if (normalizedTool === 'done' && code === 'DONE_CONTRACT_FAILED') {
+      if (this._lastToolErrorCode === 'DONE_CONTRACT_FAILED') {
+        this._sameToolErrorCount += 1;
+      } else {
+        this._lastToolErrorCode = 'DONE_CONTRACT_FAILED';
+        this._sameToolErrorCount = 1;
+      }
+
+      if (this._sameToolErrorCount >= TOOL_ERROR_LOOP_GUARD_THRESHOLD) {
+        const reason = `Loop recovery triggered: DONE_CONTRACT_FAILED repeated ${this._sameToolErrorCount} times. Switching to extraction-first recovery.`;
+        console.warn(`[Agent] ${reason}`);
+        appendTelemetry('Agent', 'loopGuard.doneRecovery', reason);
+        this._emitStep({
+          step,
+          type: 'pause',
+          content: reason,
+          code: 'DONE_CONTRACT_RECOVERY',
+          repeatCount: this._sameToolErrorCount,
+        });
+        this._sameToolErrorCount = 0;
+        this._lastToolErrorCode = '';
+        return { kind: 'recover_done_contract', reason };
+      }
+
+      return null;
+    }
+
+    if (normalizedTool === 'computer' && COMPUTER_LOOP_GUARD_CODES.has(code)) {
+      if (this._computerErrorCode === code) {
+        this._computerErrorCount += 1;
+      } else {
+        this._computerErrorCode = code;
+        this._computerErrorCount = 1;
+      }
+
+      if (this._computerErrorCount >= TOOL_ERROR_LOOP_GUARD_THRESHOLD) {
+        const reason = `Computer loop warning: ${code} repeated ${this._computerErrorCount} times for computer actions. Continuing with self-heal (no hard stop).`;
+        console.warn(`[Agent] ${reason}`);
+        appendTelemetry('Agent', 'loopGuard.computerWarning', reason);
+        this.history.push({
+          step,
+          type: 'pause',
+          content: reason,
+          code: 'COMPUTER_ERROR_LOOP_WARNING',
+          repeatedCode: code,
+          repeatCount: this._computerErrorCount,
+        });
+        this._emitStep({
+          step,
+          type: 'pause',
+          content: reason,
+          code: 'COMPUTER_ERROR_LOOP_WARNING',
+          repeatedCode: code,
+          repeatCount: this._computerErrorCount,
+        });
+
+        // Do not fail the run for computer target/action loops.
+        // Keep trying with recovery instructions and refreshed observations.
+        this._computerErrorCode = '';
+        this._computerErrorCount = 0;
+      }
+
+      // Skip generic hard guard for known recoverable computer errors.
+      return null;
+    }
+
+    if (this._lastToolErrorCode === code) {
+      this._sameToolErrorCount += 1;
+    } else {
+      this._lastToolErrorCode = code;
+      this._sameToolErrorCount = 1;
+    }
+
+    if (this._sameToolErrorCount < TOOL_ERROR_LOOP_GUARD_THRESHOLD) {
+      return null;
+    }
+
+    const reason = `Loop guard triggered: ${code} repeated ${this._sameToolErrorCount} times consecutively (latest tool: ${toolName}). Stopping to prevent unproductive retries.`;
+    console.warn(`[Agent] ${reason}`);
+    appendTelemetry('Agent', 'loopGuard.toolErrorRecovery', reason);
+    this.history.push({
+      step,
+      type: 'pause',
+      content: reason,
+      code: 'TOOL_ERROR_LOOP_RECOVERY',
+      repeatedCode: code,
+      repeatCount: this._sameToolErrorCount,
+    });
+    this._emitStep({
+      step,
+      type: 'pause',
+      content: reason,
+      code: 'TOOL_ERROR_LOOP_RECOVERY',
+      repeatedCode: code,
+      repeatCount: this._sameToolErrorCount,
+    });
+
+    const recoveryPrompt = this._buildLoopRecoveryPrompt(code, normalizedTool);
+    this._sameToolErrorCount = 0;
+    this._lastToolErrorCode = '';
+    return { kind: 'recover_generic', reason, code, recoveryPrompt };
+  }
+
+  _buildLoopRecoveryPrompt(code, toolName) {
+    const c = String(code || '').toUpperCase();
+    if (c === 'MISSING_TARGET' || c === 'INVALID_TARGET') {
+      return 'Recovery mode: repeated target errors. First call find or read_page, then use a fresh numeric target ID. If IDs stay unstable, use screenshot and computer(action="click", x=..., y=...) and reacquire a fresh target.';
+    }
+    if (c === 'ELEMENT_NOT_FOUND') {
+      return 'Recovery mode: element keeps disappearing. Call screenshot, switch to coordinate click, then read_page to continue with fresh IDs.';
+    }
+    if (c === 'UNKNOWN_COMPUTER_ACTION') {
+      return 'Recovery mode: use only valid computer actions: click, type, scroll, hover, select, key, drag, form_input. Retry with a valid action and arguments.';
+    }
+    if (c.includes('WAIT_TIMEOUT')) {
+      return 'Recovery mode: waiting strategy is not working. Re-observe the page (read_page/get_page_text), then choose a different interaction path instead of repeating the same wait.';
+    }
+    return `Recovery mode: repeated error ${c} on tool ${toolName || 'unknown'}. Change strategy, re-observe current page state, and continue without repeating the same failing call.`;
+  }
+
+  async _attemptComputerSelfHeal(step, messages, args, result) {
+    const code = String(result?.code || '').trim();
+    if (!COMPUTER_LOOP_GUARD_CODES.has(code)) return false;
+    if (this._computerSelfHealAttempts >= MAX_COMPUTER_SELF_HEAL_ATTEMPTS) return false;
+
+    this._computerSelfHealAttempts += 1;
+    let observation = null;
+    try {
+      observation = await this._executeTool('read_page', {
+        maxDepth: 8,
+        maxNodes: 160,
+        viewportOnly: false,
+      });
+    } catch (err) {
+      observation = this._makeError('SELF_HEAL_READ_FAILED', err?.message || String(err));
+    }
+
+    const observationSummary = observation?.success === false
+      ? `Auto-read failed: ${observation?.error || observation?.code || 'unknown error'}.`
+      : `Auto-read refreshed page context${observation?.url ? ` (${observation.url})` : ''}; interactive=${observation?.interactiveCount ?? '?'}.`;
+
+    this._appendMessage(messages, {
+      role: 'user',
+      content: `Self-heal triggered after computer(${String(args?.action || 'unknown')}) failed with ${code}. ${observationSummary} Retry with a fresh numeric target ID from the latest page tree. Do not reuse stale or placeholder targets.`,
+    });
+
+    // Vision fallback for repeated target errors:
+    // if model keeps sending null/invalid target IDs, provide screenshot guidance
+    // so it can click by coordinates and then reacquire a fresh element ID.
+    const shouldAttachVision =
+      this._providerSupportsVision() &&
+      (code === 'MISSING_TARGET' || code === 'INVALID_TARGET');
+
+    if (shouldAttachVision) {
+      try {
+        const shot = await this._executeTool('screenshot', {});
+        if (shot?.success && shot?.imageBase64) {
+          const currentProvider = this.provider.currentProvider;
+          if (currentProvider?.buildVisionMessage) {
+            this._appendMessage(messages,
+              currentProvider.buildVisionMessage(
+                'Target ID recovery required: previous computer() calls used missing/invalid target. Use this screenshot to identify coordinates and call computer(action="click", x=..., y=...) first, then call read_page/find and continue with a fresh numeric target ID.',
+                shot.imageBase64,
+                shot.mimeType || 'image/jpeg',
+              ),
+            );
+            this._emitStep({ step, type: 'pause', content: 'Self-heal: attached screenshot for coordinate fallback.' });
+          }
+        }
+      } catch (err) {
+        debugWarn('selfHeal.computer.visionFallback', err);
+      }
+    }
+
+    this.metrics.selfHeals += 1;
+    this._emitStep({ step, type: 'pause', content: `Self-heal: refreshed page context after ${code}.` });
+    appendTelemetry('Agent', 'selfHeal.computer', `Self-heal #${this._computerSelfHealAttempts} after ${code}.`);
+
+    // Reset computer-specific loop counter after a recovery action.
+    this._computerErrorCode = '';
+    this._computerErrorCount = 0;
+    return true;
+  }
+
+  _recoverComputerTargetFromContext(action) {
+    const targetActions = new Set(['click', 'type', 'hover', 'select', 'form_input']);
+    if (!targetActions.has(String(action || '').trim().toLowerCase())) return null;
+    const candidates = Array.isArray(this._lastFindResults) ? this._lastFindResults : [];
+    if (candidates.length === 0) return null;
+
+    for (const candidate of candidates) {
+      const id = Number(candidate?.agentId);
+      if (!Number.isInteger(id)) continue;
+      const score = Number(candidate?.score || 0);
+      if (!Number.isFinite(score) || score < 1) continue;
+      return id;
+    }
+    return null;
+  }
+
+  // Heuristic relevance scoring removed.
+
+  _checkSiteBlocked(url) {
+    try {
+      const hostname = new URL(url).hostname.replace(/^www\./, '');
+      for (const blocked of this.blockedDomains) {
+        const b = blocked.replace(/^www\./, '').toLowerCase();
+        if (hostname === b || hostname.endsWith('.' + b)) {
+          return `Navigation to "${hostname}" is blocked by the site blocklist. Remove the domain from the blocklist in Settings if you need access.`;
+        }
+      }
+    } catch (err) {
+      debugWarn('checkSiteBlocked.parseUrl', err);
+    }
+    return null;
+  }
+
   _validateNavigateUrl(url) {
     let raw = String(url || '').trim();
     // Auto-add https:// if LLM sends bare domain (e.g. "gramota.ru")
@@ -2458,6 +3322,7 @@ export class Agent {
     if (!haystack) return false;
     return terms.some((t) => haystack.includes(t));
   }
+
 
   async _detectManualIntervention() {
     let tab;

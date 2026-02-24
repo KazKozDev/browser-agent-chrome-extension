@@ -223,6 +223,7 @@
     // Continue from global seed to keep IDs unique for findByDescription
     const startSeed = findAgentSeed;
     let interactiveId = findAgentSeed;
+    const blockedTags = new Set(['SCRIPT', 'STYLE', 'SVG', 'NOSCRIPT']);
 
     // Use textContent (no layout reflow) and cap traversal output size
     function getAccessibleName(el) {
@@ -231,6 +232,14 @@
         || el.getAttribute('title')
         || el.getAttribute('placeholder');
       if (label) return label;
+
+      if (el.id) {
+        const byFor = activeDoc.querySelector(`label[for="${cssEscape(el.id)}"]`);
+        if (byFor?.textContent) return byFor.textContent;
+      }
+
+      const wrappedLabel = el.closest('label');
+      if (wrappedLabel?.textContent) return wrappedLabel.textContent;
 
       // textContent is layout-free (faster than innerText)
       const raw = el.textContent;
@@ -243,14 +252,67 @@
     function isInteractive(el) {
       const tag = el.tagName.toLowerCase();
       if (['a', 'button', 'input', 'select', 'textarea', 'summary'].includes(tag)) return true;
-      if (el.getAttribute('role') === 'button' || el.getAttribute('role') === 'link') return true;
+      const role = el.getAttribute('role');
+      if (role === 'button' || role === 'link' || role === 'tab' || role === 'menuitem'
+          || role === 'option' || role === 'switch' || role === 'checkbox' || role === 'radio'
+          || role === 'combobox' || role === 'slider' || role === 'spinbutton'
+          || role === 'treeitem' || role === 'listbox') return true;
       if (el.onclick || el.getAttribute('onclick')) return true;
       if (el.tabIndex >= 0) return true;
+      // SPA frameworks: detect click listeners via common data attributes
+      if (el.hasAttribute('data-action') || el.hasAttribute('data-click')
+          || el.hasAttribute('data-toggle') || el.hasAttribute('data-dismiss')
+          || el.hasAttribute('data-bs-toggle') || el.hasAttribute('data-testid')
+          || el.hasAttribute('ng-click') || el.hasAttribute('v-on:click')
+          || el.hasAttribute('@click')) return true;
+      // Contenteditable divs (rich text editors)
+      if (el.isContentEditable && tag !== 'body') return true;
       // Expensive — only reached if nothing else matched
       try {
         if (getComputedStyle(el).cursor === 'pointer') return true;
       } catch { /* detached node */ }
       return false;
+    }
+
+    function makeCompactNode(el) {
+      if (!el || el.nodeType !== 1) return null;
+      if (!isElementVisible(el) || isBlockedBranch(el)) return null;
+
+      if (viewportOnly) {
+        const r = el.getBoundingClientRect();
+        if (r.bottom < 0 || r.top > vpH || r.right < 0 || r.left > vpW) return null;
+      }
+
+      if (!isInteractive(el)) return null;
+
+      interactiveId += 1;
+      const id = interactiveId;
+      el.setAttribute('data-agent-id', String(id));
+
+      const tag = el.tagName.toLowerCase();
+      const role = getElementRole(el) || tag;
+      const name = normalizeText(getAccessibleName(el), 80);
+      const placeholder = normalizeText(el.getAttribute('placeholder') || '', 50);
+      const href = tag === 'a' ? normalizeText(el.getAttribute('href') || '', 120) : '';
+      const type = tag === 'input' ? normalizeText(el.getAttribute('type') || 'text', 24) : '';
+      const state = getState(el);
+
+      const lineParts = [`[${id}]`, role];
+      if (name) lineParts.push(`"${name}"`);
+      if (placeholder) lineParts.push(`placeholder="${placeholder}"`);
+      if (type && type !== 'text') lineParts.push(`type="${type}"`);
+      if (href) lineParts.push(`href="${href}"`);
+
+      return {
+        id,
+        role,
+        tag,
+        name: name || undefined,
+        placeholder: placeholder || undefined,
+        href: href || undefined,
+        state: state || undefined,
+        line: lineParts.join(' '),
+      };
     }
 
     function getState(el) {
@@ -376,8 +438,10 @@
       url: activeView.location.href,
       title: activeDoc.title,
       tree: tree,
+      elements,
+      snapshot: lines.join('\n'),
       interactiveCount: interactiveId - startSeed,
-      nodeCount: nodeCount,
+      nodeCount: 1 + elements.length + textSnippets.length,
       frame: activeFrameLabel,
       scroll: {
         x: Math.round(activeView.scrollX),
@@ -970,6 +1034,11 @@
             { target },
           );
         }
+        // Detect links that open in a new tab (target="_blank")
+        const linkEl = el.closest('a[href]');
+        const opensNewTab = linkEl && (linkEl.target === '_blank' || linkEl.getAttribute('target') === '_blank');
+        const linkHref = linkEl?.href || null;
+
         el.scrollIntoView({ block: 'center', behavior: 'instant' });
         const btnName = (params?.button || 'left').toLowerCase();
         const btnCode = btnName === 'right' ? 2 : btnName === 'middle' ? 1 : 0;
@@ -1135,10 +1204,18 @@
     try {
       const fn = new Function(code);
       const result = fn();
-      return {
-        success: true,
-        result: result !== undefined ? String(result).slice(0, 5000) : 'undefined',
-      };
+      if (result === undefined) return { success: true, result: 'undefined' };
+      if (result === null) return { success: true, result: 'null' };
+      // Serialize objects/arrays as JSON so the agent can read structured data
+      if (typeof result === 'object') {
+        try {
+          const json = JSON.stringify(result, null, 2);
+          return { success: true, result: json.slice(0, 10000) };
+        } catch {
+          return { success: true, result: String(result).slice(0, 5000) };
+        }
+      }
+      return { success: true, result: String(result).slice(0, 5000) };
     } catch (err) {
       return makeError(ACTION_ERROR.JS_EXEC_FAILED, err.message);
     }
@@ -1261,6 +1338,7 @@
     query = String(query || '').toLowerCase().trim();
     if (!query) return [];
     const queryWords = query.split(/\s+/).filter(Boolean);
+    const queryHintsInput = /\b(search|find|lookup|query|иск|поиск|searchbox|input|поле|строк)\b/.test(query);
     const candidates = [];
 
     const selector = 'a, button, input, select, textarea, [role="button"], [role="link"], [onclick], [tabindex]';
@@ -1302,6 +1380,21 @@
       // Bonus for shorter text (more specific match is better)
       score += Math.max(0, 3 - text.length / 100);
 
+      const tag = el.tagName.toLowerCase();
+      const role = (getElementRole(el) || '').toLowerCase();
+      const type = String(el.getAttribute('type') || '').toLowerCase();
+      const looksLikeTextInput = tag === 'textarea'
+        || (tag === 'input' && !['button', 'submit', 'reset', 'checkbox', 'radio', 'file', 'range', 'color', 'image'].includes(type))
+        || role === 'textbox' || role === 'searchbox' || role === 'combobox';
+
+      if (queryHintsInput) {
+        if (looksLikeTextInput) score += 8;
+        if (role === 'button' || tag === 'button' || type === 'submit') score -= 4;
+      }
+
+      const hasSearchSignal = /\b(search|поиск|найти|искать)\b/.test(text) || type === 'search';
+      if (hasSearchSignal && looksLikeTextInput) score += 3;
+
       const rect = el.getBoundingClientRect();
       const agentId = ensureAgentId(el);
       const inputType = el.tagName.toLowerCase() === 'input'
@@ -1309,7 +1402,7 @@
         : '';
       candidates.push({
         agentId,
-        tag: el.tagName.toLowerCase(),
+        tag,
         text: el.innerText?.trim().slice(0, 60),
         role: getElementRole(el),
         inputType,
@@ -1652,12 +1745,31 @@
   const runtimeState = globalThis[RUNTIME_STATE_KEY] || (globalThis[RUNTIME_STATE_KEY] = {
     initialized: false,
     listenerInstalled: false,
+    observerInstalled: false,
+    domCache: { tree: null, text: null, dirty: true },
   });
+  const domCache = runtimeState.domCache;
 
   if (!runtimeState.initialized) {
     interceptConsole();
     interceptNetwork();
     runtimeState.initialized = true;
+  }
+
+  // ===== DOM CACHE (MutationObserver) =====
+  // Invalidate cache whenever the page DOM or scroll position changes.
+  // This prevents redundant re-parsing when the LLM calls read_page/get_page_text back-to-back.
+  if (!runtimeState.observerInstalled) {
+    const _invalidate = () => { domCache.dirty = true; };
+    const _target = document.body || document.documentElement;
+    if (_target) {
+      new MutationObserver(_invalidate).observe(_target, {
+        childList: true, subtree: true, attributes: true, characterData: true,
+      });
+    }
+    window.addEventListener('scroll', _invalidate, { passive: true });
+    window.addEventListener('popstate', _invalidate, { passive: true });
+    runtimeState.observerInstalled = true;
   }
 
   // ===== MESSAGE HANDLER =====
@@ -1668,7 +1780,19 @@
     try {
       switch (action) {
         case 'readPage':
-          sendResponse(extractAccessibilityTree(payload));
+          // viewportOnly changes the result, so skip cache when it's set
+          if (!domCache.dirty && domCache.tree && !payload?.viewportOnly) {
+            sendResponse({ ...domCache.tree, cached: true });
+          } else {
+            const _treeResult = extractAccessibilityTree(payload);
+            // Only cache full-page results (not viewportOnly)
+            if (!payload?.viewportOnly) {
+              domCache.tree = _treeResult;
+              domCache.text = null; // text cache may be stale after full re-parse
+              domCache.dirty = false;
+            }
+            sendResponse(_treeResult);
+          }
           break;
         case 'getPageText':
           sendResponse(getPageText(payload));
@@ -1742,6 +1866,9 @@
           });
           findAgentSeed = 0;
           resetFrameContext();
+          domCache.dirty = true;
+          domCache.tree = null;
+          domCache.text = null;
           sendResponse({ success: true });
           break;
         default:

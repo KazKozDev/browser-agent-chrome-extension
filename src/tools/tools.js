@@ -3,16 +3,19 @@
  *
  * JSON Schema definitions for all browser tools.
  * These are sent to the LLM as function calling tools.
+ * Static set — all tools are always included in every request.
  */
 
 export const TOOLS = [
   // ── Page Understanding ──────────────────────────────────────────
   {
     name: 'read_page',
-    description: 'Get the accessibility tree of the current page. Returns semantic structure with interactive elements labeled by [id]. Use this as the primary way to understand the page.',
+    description: 'Get a compact accessibility snapshot of the current page. Returns semantic structure and an interactive elements list labeled by [id] (token-efficient, no raw HTML). Use this as the primary way to understand the page.',
     parameters: {
       type: 'object',
+      required: ['thought'],
       properties: {
+        thought: { type: 'string', description: 'Your reasoning for choosing this action and its expected outcome' },
         maxDepth: { type: 'integer', description: 'Max tree depth (default 15)', default: 15 },
         maxNodes: { type: 'integer', description: 'Max nodes to return (default 500)', default: 500 },
         viewportOnly: { type: ['boolean', 'string'], description: 'If true, only returns elements visible in the current viewport' },
@@ -64,16 +67,17 @@ export const TOOLS = [
   },
   {
     name: 'find',
-    description: 'Find interactive elements on the page using a natural language description. Returns matching elements with their agent IDs, sorted by relevance.',
+    description: 'Find interactive elements on the page using a natural language description. Returns matching elements with their agentId (numeric), sorted by relevance. Use the returned agentId number directly as the target parameter in computer() calls. Example: if find returns {agentId: 17, tag: "input"}, then call computer(action="click", target=17).',
     parameters: {
       type: 'object',
       properties: {
+        thought: { type: 'string', description: 'Your reasoning for choosing this action and its expected outcome' },
         query: {
           type: 'string',
           description: 'Natural language description of the element to find, e.g. "search button", "email input", "sign in link"',
         },
       },
-      required: ['query'],
+      required: ['thought', 'query'],
     },
   },
   {
@@ -82,13 +86,14 @@ export const TOOLS = [
     parameters: {
       type: 'object',
       properties: {
+        thought: { type: 'string', description: 'Your reasoning for choosing this action and its expected outcome' },
         query: { type: 'string', description: 'Text to search for on the page' },
         caseSensitive: { type: ['boolean', 'string'], description: 'Match case exactly if true' },
         wholeWord: { type: ['boolean', 'string'], description: 'Match whole words only if true' },
         maxResults: { type: 'integer', description: 'Maximum matches to return (default 20)', default: 20 },
         scrollToFirst: { type: ['boolean', 'string'], description: 'Scroll to first match if true (default true)' },
       },
-      required: ['query'],
+      required: ['thought', 'query'],
     },
   },
   {
@@ -102,14 +107,28 @@ export const TOOLS = [
 
   // ── Navigation ──────────────────────────────────────────────────
   {
+    name: 'screenshot',
+    description: 'Take a screenshot of the current tab. The image will be sent to the LLM as a vision message for visual understanding. Use when accessibility tree is insufficient (canvas, images, complex layouts).',
+    parameters: {
+      type: 'object',
+      required: ['thought'],
+      properties: {
+        thought: { type: 'string', description: 'Your reasoning for choosing this action and its expected outcome' },},
+    },
+  },
+
+  // ── NAVIGATION ─────────────────────────────────────────────────────────────
+
+  {
     name: 'navigate',
-    description: 'Navigate to a URL. Use full URLs with https://.',
+    description: 'Navigate to a URL in the current tab. Use full URLs with https://. Use this to open websites before interacting with them.',
     parameters: {
       type: 'object',
       properties: {
+        thought: { type: 'string', description: 'Your reasoning for choosing this action and its expected outcome' },
         url: { type: 'string', description: 'Full http/https URL to navigate to' },
       },
-      required: ['url'],
+      required: ['thought', 'url'],
     },
   },
   {
@@ -117,7 +136,9 @@ export const TOOLS = [
     description: 'Go back in browser history for the current tab.',
     parameters: {
       type: 'object',
-      properties: {},
+      required: ['thought'],
+      properties: {
+        thought: { type: 'string', description: 'Your reasoning for choosing this action and its expected outcome' },},
     },
   },
 
@@ -206,6 +227,7 @@ export const TOOLS = [
     parameters: {
       type: 'object',
       properties: {
+        thought: { type: 'string', description: 'Your reasoning for choosing this action and its expected outcome' },
         condition: {
           type: 'string',
           enum: ['element', 'url_includes', 'text', 'navigation_complete', 'network_idle'],
@@ -217,7 +239,7 @@ export const TOOLS = [
         pollMs: { type: 'integer', description: 'Polling interval in ms (default 250)', default: 250 },
         idleMs: { type: 'integer', description: 'Idle window for condition=network_idle (default 1200)', default: 1200 },
       },
-      required: ['condition'],
+      required: ['thought', 'condition'],
     },
   },
 
@@ -227,6 +249,7 @@ export const TOOLS = [
     description: 'Execute JavaScript in the page context. Universal fallback for any action not covered by other tools: DOM manipulation, drag-and-drop, file uploads, form control, reading console/network, etc. Access to cookies, localStorage, and sessionStorage is blocked.',
     parameters: {
       type: 'object',
+      required: ['thought'],
       properties: {
         code: { type: 'string', description: 'JavaScript code to execute. Returns the result of the last expression.' },
       },
@@ -247,12 +270,17 @@ export const TOOLS = [
       required: ['url'],
     },
   },
+
+  // ── TAB MANAGEMENT ─────────────────────────────────────────────────────────
+
   {
     name: 'list_tabs',
     description: 'List tabs in the current browser window.',
     parameters: {
       type: 'object',
-      properties: {},
+      required: ['thought'],
+      properties: {
+        thought: { type: 'string', description: 'Your reasoning for choosing this action and its expected outcome' },},
     },
   },
   {
@@ -260,7 +288,9 @@ export const TOOLS = [
     description: 'Switch active tab by tab ID or index.',
     parameters: {
       type: 'object',
+      required: ['thought'],
       properties: {
+        thought: { type: 'string', description: 'Your reasoning for choosing this action and its expected outcome' },
         tabId: { type: ['integer', 'string'], description: 'Target tab ID' },
         index: { type: ['integer', 'string'], description: 'Target tab index in current window (0-based)' },
       },
@@ -284,11 +314,15 @@ export const TOOLS = [
       },
     },
   },
+
+  // ── DIAGNOSTICS ────────────────────────────────────────────────────────────
+
   {
     name: 'notify_connector',
     description: 'Send a message to a connected integration (telegram, notion, slack, discord, airtable, sheets, email, or custom webhook) during task execution.',
     parameters: {
       type: 'object',
+      required: ['thought'],
       properties: {
         connectorId: { type: 'string', description: 'Connected integration ID, e.g. "telegram", "notion", "slack".' },
         message: { type: 'string', description: 'Message text/content to deliver to the connector.' },
@@ -299,15 +333,67 @@ export const TOOLS = [
 
   // ── Completion ──────────────────────────────────────────────────
   {
-    name: 'done',
-    description: 'Mark the task as completed successfully. For information tasks, put the extracted answer in the "answer" field.',
+    name: 'get_network_requests',
+    description: 'Read recent HTTP network requests captured from the current page, with URLs, methods, status codes, and timing. Useful for understanding API calls, debugging failed requests, or finding data endpoints.',
+    parameters: {
+      type: 'object',
+      required: ['thought'],
+      properties: {
+        thought: { type: 'string', description: 'Your reasoning for choosing this action and its expected outcome' },
+        since: { type: 'integer', description: 'Timestamp to filter requests after (0 = all)', default: 0 },
+      },
+    },
+  },
+
+  // ── UTILITIES ──────────────────────────────────────────────────────────────
+
+  {
+    name: 'resize_window',
+    description: 'Resize the browser window. Use when a site has responsive breakpoints that change UI layout (e.g. mobile view at width < 768px, tablet at < 1024px).',
     parameters: {
       type: 'object',
       properties: {
-        summary: { type: 'string', description: 'Brief summary of what was accomplished (1 sentence)' },
-        answer: { type: 'string', description: 'The actual answer/information extracted from the page. Required for information/search tasks. Include the full relevant text.' },
+        thought: { type: 'string', description: 'Your reasoning for choosing this action and its expected outcome' },
+        width: { type: 'integer', description: 'Window width in pixels' },
+        height: { type: 'integer', description: 'Window height in pixels' },
       },
-      required: ['summary'],
+      required: ['thought', 'width', 'height'],
+    },
+  },
+
+  // ── EXTERNAL ───────────────────────────────────────────────────────────────
+
+  {
+    name: 'http_request',
+    description: 'Make an HTTP request to any URL — REST APIs, webhooks, Notion API, Slack, Airtable, Google Sheets, etc. Responses are returned as text or JSON. Use this to read from or write to external services without opening a browser tab.',
+    parameters: {
+      type: 'object',
+      required: ['thought', 'url'],
+      properties: {
+        thought: { type: 'string', description: 'Your reasoning for choosing this action and its expected outcome' },
+        url: { type: 'string', description: 'Full URL including query parameters if needed.' },
+        method: { type: 'string', enum: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], description: 'HTTP method. Default: GET.' },
+        headers: { type: 'object', description: 'HTTP headers as key-value pairs (e.g. { "Authorization": "Bearer TOKEN", "Content-Type": "application/json" }).' },
+        body: { description: 'Request body. For JSON APIs pass an object — it will be serialized automatically. For form data pass a string.' },
+        timeout: { type: 'number', description: 'Timeout in milliseconds. Default: 15000.' },
+        allow_private: { type: 'boolean', description: 'Set true to allow requests to localhost or private IP ranges (e.g. a local Ollama server). Default: false.' },
+      },
+    },
+  },
+
+  // ── COMPLETION ─────────────────────────────────────────────────────────────
+
+  {
+    name: 'done',
+    description: 'Mark the task as completed successfully. For information tasks, put the extracted answer in the "answer" field with source URL(s).',
+    parameters: {
+      type: 'object',
+      properties: {
+        thought: { type: 'string', description: 'Your reasoning for choosing this action and its expected outcome' },
+        summary: { type: 'string', description: 'Brief summary of what was accomplished (1 sentence)' },
+        answer: { type: 'string', description: 'The actual answer/information extracted from the page. Required for information/search tasks. Include the full relevant text and the source URL(s) where it was found.' },
+      },
+      required: ['thought', 'summary'],
     },
   },
   {
@@ -327,11 +413,13 @@ export const TOOLS = [
     parameters: {
       type: 'object',
       properties: {
+        thought: { type: 'string', description: 'Your reasoning for choosing this action and its expected outcome' },
         reason: { type: 'string', description: 'Why the task failed' },
       },
-      required: ['reason'],
+      required: ['thought', 'reason'],
     },
   },
+
 ];
 
 export function getToolByName(name) {

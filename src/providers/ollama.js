@@ -40,11 +40,21 @@ export class OllamaProvider extends BaseLLMProvider {
   }
 
   async chat(messages, tools = [], options = {}) {
+    // Thinking mode keeps wider sampling, no-think mode uses anti-repetition defaults.
+    const thinkingEnabled = options?.disableThinking === true ? false : !!options.thinking;
+    const temperature = thinkingEnabled ? 1.0 : (options.temperature ?? this.temperature);
+    const topP = options.topP ?? (thinkingEnabled ? 0.95 : this.topP);
+    const topK = options.topK ?? (thinkingEnabled ? 20 : this.topK);
+    const presencePenalty = options.presencePenalty ?? (thinkingEnabled ? 0.0 : this.presencePenalty);
+    const repeatPenalty = options.repeatPenalty ?? this.repeatPenalty;
+    const numCtx = thinkingEnabled ? 32768 : this.numCtx;
+    const maxTokens = options.maxTokens || this.maxTokens;
+
     const body = {
       model: this.model,
-      messages,
-      max_tokens: options.maxTokens || this.maxTokens,
-      temperature: options.temperature ?? this.temperature,
+      messages: this.sanitizeMessages(messages),
+      max_tokens: maxTokens,
+      temperature,
       stream: false,
       // Ollama-specific options: context window + sampling params for Qwen3-VL
       options: {
@@ -72,9 +82,17 @@ export class OllamaProvider extends BaseLLMProvider {
     }
 
     const message = response.choices?.[0]?.message || {};
+    const contentText = typeof message.content === 'string' ? message.content.trim() : '';
+    const thinkingText = typeof message.thinking === 'string' ? message.thinking.trim() : '';
+    const reasoningText = typeof message.reasoning === 'string'
+      ? message.reasoning.trim()
+      : (typeof message.reasoning_content === 'string' ? message.reasoning_content.trim() : '');
+    const effectiveText = contentText || reasoningText;
     return {
-      text: message.content || '',
+      text: effectiveText,
       toolCalls: this.parseToolCalls(response),
+      // message.thinking is populated when think=true (Ollama ≥0.7)
+      thinking: thinkingText || reasoningText || null,
       usage: response.usage || {},
       raw: response,
     };
