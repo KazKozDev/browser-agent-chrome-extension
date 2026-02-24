@@ -21,10 +21,45 @@ export const TOOLS = [
   },
   {
     name: 'get_page_text',
-    description: 'Get the raw text content of the page. Use for text-heavy pages like articles, docs, or when you need to read the full content.',
+    description: 'Get text content from the page. Supports full-page, viewport-only, or CSS-selector scoped extraction.',
     parameters: {
       type: 'object',
-      properties: {},
+      properties: {
+        scope: {
+          type: 'string',
+          enum: ['full', 'viewport', 'selector'],
+          description: 'Extraction scope: full page (default), only visible viewport, or specific CSS selector.',
+        },
+        selector: {
+          type: 'string',
+          description: 'CSS selector used when scope=selector (e.g. ".result-item, article").',
+        },
+        maxChars: {
+          type: 'integer',
+          description: 'Maximum number of characters to return (default 15000, max 50000).',
+        },
+      },
+    },
+  },
+  {
+    name: 'extract_structured',
+    description: 'Extract repeated content blocks (products/results/cards) into structured JSON objects with fields like title, price, rating, and url.',
+    parameters: {
+      type: 'object',
+      properties: {
+        hint: {
+          type: 'string',
+          description: 'Optional hint for target list type, e.g. "product cards", "search results", "table rows".',
+        },
+        selector: {
+          type: 'string',
+          description: 'Optional CSS selector for list item roots. If omitted, heuristics are used.',
+        },
+        maxItems: {
+          type: 'integer',
+          description: 'Maximum number of extracted items (default 30, max 100).',
+        },
+      },
     },
   },
   {
@@ -249,6 +284,18 @@ export const TOOLS = [
       },
     },
   },
+  {
+    name: 'notify_connector',
+    description: 'Send a message to a connected integration (telegram, notion, slack, discord, airtable, sheets, email, or custom webhook) during task execution.',
+    parameters: {
+      type: 'object',
+      properties: {
+        connectorId: { type: 'string', description: 'Connected integration ID, e.g. "telegram", "notion", "slack".' },
+        message: { type: 'string', description: 'Message text/content to deliver to the connector.' },
+      },
+      required: ['connectorId', 'message'],
+    },
+  },
 
   // ── Completion ──────────────────────────────────────────────────
   {
@@ -261,6 +308,17 @@ export const TOOLS = [
         answer: { type: 'string', description: 'The actual answer/information extracted from the page. Required for information/search tasks. Include the full relevant text.' },
       },
       required: ['summary'],
+    },
+  },
+  {
+    name: 'save_progress',
+    description: 'Save intermediate findings into persistent task scratchpad memory so they remain available across future steps.',
+    parameters: {
+      type: 'object',
+      properties: {
+        data: { description: 'Any JSON-serializable object to merge into accumulated progress.' },
+      },
+      required: ['data'],
     },
   },
   {

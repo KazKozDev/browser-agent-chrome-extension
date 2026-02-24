@@ -160,11 +160,23 @@
   }
 
   function setTextLikeValue(el, value) {
-    if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
-      const proto = el instanceof HTMLInputElement
-        ? window.HTMLInputElement.prototype
-        : window.HTMLTextAreaElement.prototype;
-      const nativeValueSetter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+    if (el instanceof HTMLInputElement) {
+      const inputType = String(el.type || 'text').toLowerCase();
+      const textTypes = new Set(['text', 'search', 'email', 'url', 'tel', 'password', 'number']);
+      if (!textTypes.has(inputType)) return false;
+      const nativeValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+      if (nativeValueSetter) {
+        nativeValueSetter.call(el, value);
+      } else {
+        el.value = value;
+      }
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      return true;
+    }
+
+    if (el instanceof HTMLTextAreaElement) {
+      const nativeValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
       if (nativeValueSetter) {
         nativeValueSetter.call(el, value);
       } else {
@@ -382,40 +394,131 @@
 
   // ===== GET PAGE TEXT =====
 
-  function getPageText() {
-    const activeDoc = getActiveDocument();
-    const activeView = activeDoc.defaultView || window;
-    const blockedTags = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'NAV', 'FOOTER', 'HEADER', 'ASIDE']);
-    const maxChars = 15000;
-    let collected = '';
-    const walker = activeDoc.createTreeWalker(activeDoc.body, NodeFilter.SHOW_TEXT, {
-      acceptNode(node) {
-        const parent = node.parentElement;
-        if (!parent) return NodeFilter.FILTER_REJECT;
-        if (blockedTags.has(parent.tagName)) return NodeFilter.FILTER_REJECT;
-        const role = parent.getAttribute('role');
-        if (role === 'banner' || role === 'navigation') return NodeFilter.FILTER_REJECT;
-        if (!isElementVisible(parent)) return NodeFilter.FILTER_REJECT;
-        const value = node.nodeValue?.trim();
-        if (!value) return NodeFilter.FILTER_REJECT;
-        return NodeFilter.FILTER_ACCEPT;
-      },
-    });
+  function normalizeTextScope(value) {
+    const raw = String(value || 'full').trim().toLowerCase();
+    if (raw === 'viewport' || raw === 'selector') return raw;
+    return 'full';
+  }
 
-    while (walker.nextNode()) {
-      const value = walker.currentNode.nodeValue.trim();
-      if (!value) continue;
-      const next = `${collected}\n${value}`;
-      if (next.length > maxChars) {
-        collected = next.slice(0, maxChars);
-        break;
+  function intersectsViewport(el, view) {
+    if (!el) return false;
+    const rect = el.getBoundingClientRect();
+    const h = view.innerHeight || el.ownerDocument?.documentElement?.clientHeight || 0;
+    const w = view.innerWidth || el.ownerDocument?.documentElement?.clientWidth || 0;
+    if (rect.width <= 0 || rect.height <= 0) return false;
+    if (rect.bottom < 0 || rect.top > h) return false;
+    if (rect.right < 0 || rect.left > w) return false;
+    return true;
+  }
+
+  function uniqueRoots(elements) {
+    const out = [];
+    for (const el of elements) {
+      if (!el) continue;
+      const nested = out.some((base) => base.contains(el));
+      if (nested) continue;
+      // Remove roots that are nested inside the new root.
+      for (let i = out.length - 1; i >= 0; i--) {
+        if (el.contains(out[i])) out.splice(i, 1);
       }
-      collected = next;
+      out.push(el);
+    }
+    return out;
+  }
+
+  function getPreferredContentRoots(activeDoc) {
+    const selectors = [
+      'main',
+      '[role="main"]',
+      'article',
+      '.content',
+      '.article',
+      '.entry-content',
+      '.post-content',
+      '.main-content',
+      '[class*="answer"]',
+      '[id*="content"]',
+    ];
+    const found = [];
+    for (const selector of selectors) {
+      const nodes = Array.from(activeDoc.querySelectorAll(selector));
+      for (const node of nodes) {
+        if (!node || !isElementVisible(node)) continue;
+        found.push(node);
+      }
+      if (found.length >= 40) break;
+    }
+    return uniqueRoots(found);
+  }
+
+  function collectTextFromRoots(activeDoc, activeView, roots, maxChars, viewportOnly) {
+    const blockedTags = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'NAV', 'FOOTER', 'HEADER', 'ASIDE']);
+    let collected = '';
+    let truncated = false;
+
+    for (const root of roots) {
+      if (!root || !isElementVisible(root)) continue;
+      const walker = activeDoc.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+        acceptNode(node) {
+          const parent = node.parentElement;
+          if (!parent) return NodeFilter.FILTER_REJECT;
+          if (blockedTags.has(parent.tagName)) return NodeFilter.FILTER_REJECT;
+          const role = parent.getAttribute('role');
+          if (role === 'banner' || role === 'navigation') return NodeFilter.FILTER_REJECT;
+          if (!isElementVisible(parent)) return NodeFilter.FILTER_REJECT;
+          if (viewportOnly && !intersectsViewport(parent, activeView)) return NodeFilter.FILTER_REJECT;
+          const value = node.nodeValue?.trim();
+          if (!value) return NodeFilter.FILTER_REJECT;
+          return NodeFilter.FILTER_ACCEPT;
+        },
+      });
+
+      while (walker.nextNode()) {
+        const value = walker.currentNode.nodeValue?.trim();
+        if (!value) continue;
+        const next = collected ? `${collected}\n${value}` : value;
+        if (next.length > maxChars) {
+          collected = next.slice(0, maxChars);
+          truncated = true;
+          break;
+        }
+        collected = next;
+      }
+      if (truncated) break;
     }
 
-    const text = collected
-      .replace(/\n{3,}/g, '\n\n')
-      .trim();
+    return {
+      text: collected.replace(/\n{3,}/g, '\n\n').trim(),
+      truncated,
+    };
+  }
+
+  function getPageText(payload = {}) {
+    const activeDoc = getActiveDocument();
+    const activeView = activeDoc.defaultView || window;
+    const scope = normalizeTextScope(payload?.scope);
+    const selector = String(payload?.selector || '').trim();
+    const maxChars = Math.min(Math.max(Number(payload?.maxChars) || 15000, 200), 50000);
+
+    let roots = [];
+    if (scope === 'selector') {
+      if (!selector) {
+        return makeError(ACTION_ERROR.INVALID_ACTION, 'get_page_text with scope=selector requires selector');
+      }
+      let nodes;
+      try {
+        nodes = Array.from(activeDoc.querySelectorAll(selector));
+      } catch {
+        return makeError(ACTION_ERROR.INVALID_ACTION, `Invalid CSS selector: "${selector}"`);
+      }
+      roots = uniqueRoots(nodes);
+    } else {
+      const preferred = getPreferredContentRoots(activeDoc);
+      roots = preferred.length > 0 ? preferred : [activeDoc.body];
+    }
+
+    const viewportOnly = scope === 'viewport';
+    const { text, truncated } = collectTextFromRoots(activeDoc, activeView, roots, maxChars, viewportOnly);
 
     return {
       url: activeView.location.href,
@@ -423,6 +526,379 @@
       text,
       charCount: text.length,
       frame: activeFrameLabel,
+      scope,
+      selector: scope === 'selector' ? selector : '',
+      rootCount: roots.length,
+      truncated,
+    };
+  }
+
+  function normalizePriceNumber(raw) {
+    const cleaned = String(raw || '').replace(/[^\d.,]/g, '');
+    if (!cleaned) return null;
+    const hasComma = cleaned.includes(',');
+    const hasDot = cleaned.includes('.');
+    let normalized = cleaned;
+    if (hasComma && hasDot) {
+      const lastComma = cleaned.lastIndexOf(',');
+      const lastDot = cleaned.lastIndexOf('.');
+      if (lastComma > lastDot) {
+        normalized = cleaned.replace(/\./g, '').replace(',', '.');
+      } else {
+        normalized = cleaned.replace(/,/g, '');
+      }
+    } else if (hasComma && !hasDot) {
+      const parts = cleaned.split(',');
+      normalized = parts.length > 1 && parts[parts.length - 1].length <= 2
+        ? `${parts.slice(0, -1).join('')}.${parts[parts.length - 1]}`
+        : cleaned.replace(/,/g, '');
+    } else {
+      normalized = cleaned.replace(/,/g, '');
+    }
+    const n = Number.parseFloat(normalized);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  function extractPriceFromText(text) {
+    const match = String(text || '').match(/([$€£¥₽₹])\s?(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{1,2})?|\d+(?:[.,]\d{1,2})?)/);
+    if (!match) return { value: null, currency: '' };
+    return {
+      value: normalizePriceNumber(match[2]),
+      currency: match[1] || '',
+    };
+  }
+
+  function extractRatingFromText(text) {
+    const src = String(text || '').toLowerCase();
+    let rating = null;
+    const direct = src.match(/(\d(?:[.,]\d)?)\s*(?:out of|\/)\s*5/);
+    if (direct) {
+      rating = Number.parseFloat(direct[1].replace(',', '.'));
+    } else {
+      const stars = src.match(/(\d(?:[.,]\d)?)\s*stars?/);
+      if (stars) rating = Number.parseFloat(stars[1].replace(',', '.'));
+    }
+
+    let ratingCount = null;
+    const countMatch = src.match(/([\d,.]+)\s*(ratings?|reviews?)/);
+    if (countMatch) {
+      const asInt = Number.parseInt(countMatch[1].replace(/[^\d]/g, ''), 10);
+      ratingCount = Number.isFinite(asInt) ? asInt : null;
+    }
+
+    return {
+      value: Number.isFinite(rating) ? rating : null,
+      count: ratingCount,
+    };
+  }
+
+  function extractCanonicalUrl(el, baseUrl) {
+    const link = el.querySelector('a[href]');
+    if (!link) return '';
+    const href = String(link.getAttribute('href') || '').trim();
+    if (!href || /^javascript:/i.test(href)) return '';
+    try {
+      return new URL(href, baseUrl).toString();
+    } catch {
+      return '';
+    }
+  }
+
+  function extractTitle(el) {
+    const titleEl = el.querySelector('h1,h2,h3,[data-cy*="title"],[class*="title"],a');
+    const text = String(titleEl?.innerText || '').replace(/\s+/g, ' ').trim();
+    if (text.length >= 4) return text.slice(0, 280);
+    const fallback = String(el.innerText || '').replace(/\s+/g, ' ').trim();
+    return fallback.slice(0, 280);
+  }
+
+  function scoreItem(item) {
+    let c = 0;
+    if (item.title && item.title.length >= 6) c += 0.4;
+    if (item.url) c += 0.2;
+    if (typeof item.price_value === 'number') c += 0.2;
+    if (typeof item.rating_value === 'number') c += 0.2;
+    return Math.min(1, Math.round(c * 100) / 100);
+  }
+
+  function buildStructuredItem(el, activeView) {
+    const text = String(el.innerText || '').replace(/\s+/g, ' ').trim();
+    if (text.length < 12) return null;
+
+    const title = extractTitle(el);
+    const url = extractCanonicalUrl(el, activeView.location.href);
+    const img = el.querySelector('img[src]')?.getAttribute('src') || '';
+    const price = extractPriceFromText(text);
+    const rating = extractRatingFromText(text);
+
+    if (!title && !url && typeof price.value !== 'number' && typeof rating.value !== 'number') {
+      return null;
+    }
+
+    const item = {
+      title,
+      price_value: typeof price.value === 'number' ? price.value : null,
+      price_currency: price.currency || '',
+      rating_value: typeof rating.value === 'number' ? rating.value : null,
+      rating_count: typeof rating.count === 'number' ? rating.count : null,
+      url,
+      image: img || '',
+    };
+    item.confidence = scoreItem(item);
+    return item;
+  }
+
+  function candidateRoots(activeDoc, hint, selector) {
+    if (selector) {
+      try {
+        return Array.from(activeDoc.querySelectorAll(selector));
+      } catch {
+        return [];
+      }
+    }
+
+    const lcHint = String(hint || '').toLowerCase();
+    const host = String(activeDoc.defaultView?.location?.hostname || '').toLowerCase();
+    const path = String(activeDoc.defaultView?.location?.pathname || '');
+    const isAmazonSearch = /(^|\.)amazon\./.test(host) && path.startsWith('/s');
+    const selectors = [];
+    if (isAmazonSearch) {
+      selectors.push(
+        'div.s-result-item[data-asin]',
+        'div[data-component-type="s-search-result"]',
+      );
+    }
+    if (lcHint.includes('product') || lcHint.includes('товар')) {
+      selectors.push(
+        'div[data-component-type="s-search-result"]',
+        '.s-result-item[data-asin]',
+        '[data-asin]',
+        '[data-testid*="product"]',
+        '[class*="product-card"]',
+      );
+    }
+    selectors.push(
+      '[class*="search-result"]',
+      '[class*="result-item"]',
+      'article',
+      'li',
+      '[role="article"]',
+    );
+
+    const out = [];
+    for (const s of selectors) {
+      const found = Array.from(activeDoc.querySelectorAll(s));
+      for (const el of found) {
+        if (out.length >= 800) return out;
+        out.push(el);
+      }
+    }
+    return out;
+  }
+
+  function extractAmazonItemsFromTitleNodes(activeDoc, activeView, maxItems, dedupe) {
+    const titleNodes = Array.from(activeDoc.querySelectorAll(
+      'h2 a span, h2 span.a-size-medium, [data-cy*="title"] h2 span, a[aria-label] h2 span'
+    ));
+    const out = [];
+    for (const node of titleNodes) {
+      if (!(node instanceof Element)) continue;
+      const title = String(node.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 280);
+      if (!title || /^results?$/i.test(title)) continue;
+      let container = node.closest('[data-component-type="s-search-result"], [data-asin], .s-result-item, [role="listitem"]');
+      if (!container) container = node.closest('div');
+      if (!container) continue;
+      const text = String(container.innerText || '').replace(/\s+/g, ' ').trim();
+      if (text.length < 20) continue;
+      let price = extractPriceFromText(text);
+      if (price.value === null) {
+        const priceText = String(container.querySelector('.a-price .a-offscreen')?.textContent || '').trim();
+        if (priceText) price = extractPriceFromText(priceText);
+      }
+      const rating = extractRatingFromText(text);
+      const item = {
+        title,
+        price_value: typeof price.value === 'number' ? price.value : null,
+        price_currency: price.currency || '',
+        rating_value: typeof rating.value === 'number' ? rating.value : null,
+        rating_count: typeof rating.count === 'number' ? rating.count : null,
+        url: extractCanonicalUrl(container, activeView.location.href),
+        image: container.querySelector('img[src]')?.getAttribute('src') || '',
+      };
+      if (item.price_value === null && item.rating_value === null) continue;
+      const dedupeKey = item.url || item.title;
+      if (!dedupeKey || dedupe.has(dedupeKey)) continue;
+      dedupe.add(dedupeKey);
+      item.confidence = scoreItem(item);
+      out.push(item);
+      if (out.length >= maxItems) break;
+    }
+    return out;
+  }
+
+  function parseAmazonItemsFromText(rawText, maxItems, dedupe) {
+    const lines = String(rawText || '')
+      .split(/\n+/)
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .slice(0, 500);
+    if (lines.length === 0) return [];
+
+    const out = [];
+    const isNoise = (s) => /^(results|sponsored|delivery|ships to|add to cart|featured|overall pick|best seller|list:|check each product page|more results?)$/i.test(s);
+    const isLikelyRating = (s) => /^\d(?:[.,]\d)?$/.test(s);
+    const isLikelyCount = (s) => /^\(?[\d.,kK+]+\)?$/.test(s);
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const priceMatch = line.match(/([$€£¥₽₹])\s*(\d{1,4}(?:[.,]\d{1,2})?)/);
+      let currency = '';
+      let priceValue = null;
+
+      if (priceMatch) {
+        currency = priceMatch[1];
+        priceValue = normalizePriceNumber(priceMatch[2]);
+      } else if (/^[$€£¥₽₹]$/.test(line)) {
+        const major = String(lines[i + 1] || '').trim();
+        const minor = String(lines[i + 2] || '').trim();
+        currency = line;
+        if (/^\d{1,4}$/.test(major) && /^\d{2}$/.test(minor)) {
+          priceValue = Number.parseFloat(`${major}.${minor}`);
+        } else if (/^\d{1,4}(?:[.,]\d{1,2})?$/.test(major)) {
+          priceValue = normalizePriceNumber(major);
+        }
+      }
+      if (!Number.isFinite(priceValue) || priceValue <= 0) continue;
+
+      let title = '';
+      for (let j = i - 1; j >= Math.max(0, i - 12); j--) {
+        const candidate = lines[j];
+        if (candidate.length < 14) continue;
+        if (isNoise(candidate) || isLikelyRating(candidate) || isLikelyCount(candidate)) continue;
+        if (/^\$/.test(candidate)) continue;
+        title = candidate.slice(0, 280);
+        break;
+      }
+      if (!title) continue;
+
+      let rating = null;
+      let ratingCount = null;
+      for (let j = i - 1; j >= Math.max(0, i - 8); j--) {
+        const src = lines[j];
+        if (rating === null && /^\d(?:[.,]\d)?$/.test(src)) {
+          const r = Number.parseFloat(src.replace(',', '.'));
+          if (Number.isFinite(r) && r >= 0 && r <= 5) rating = r;
+        }
+        if (ratingCount === null && /^\(?[\d.,kK+]+\)?$/.test(src)) {
+          const n = Number.parseInt(src.replace(/[^\d]/g, ''), 10);
+          if (Number.isFinite(n) && n > 0) ratingCount = n;
+        }
+      }
+
+      const dedupeKey = title.toLowerCase();
+      if (dedupe.has(dedupeKey)) continue;
+      dedupe.add(dedupeKey);
+      const item = {
+        title,
+        price_value: Number(priceValue),
+        price_currency: currency || '$',
+        rating_value: Number.isFinite(rating) ? rating : null,
+        rating_count: Number.isFinite(ratingCount) ? ratingCount : null,
+        url: '',
+        image: '',
+      };
+      item.confidence = scoreItem(item);
+      out.push(item);
+      if (out.length >= maxItems) break;
+    }
+    return out;
+  }
+
+  function extractStructured(payload = {}) {
+    const activeDoc = getActiveDocument();
+    const activeView = activeDoc.defaultView || window;
+    const hint = String(payload?.hint || '').trim();
+    const selector = String(payload?.selector || '').trim();
+    const maxItems = Math.min(Math.max(Number(payload?.maxItems) || 30, 1), 100);
+    const host = String(activeView.location.hostname || '').toLowerCase();
+    const isAmazonSearch = /(^|\.)amazon\./.test(host) && String(activeView.location.pathname || '').startsWith('/s');
+    const wantsProducts = isAmazonSearch || /product|products|товар|товары|headphone|headphones|науш/i.test(`${hint} ${selector}`);
+
+    const rawRoots = candidateRoots(activeDoc, hint, selector);
+    const roots = uniqueRoots(rawRoots).filter((el) => {
+      if (!isAmazonSearch && !isElementVisible(el)) return false;
+      const inChrome = el.closest('nav,header,footer,aside,[role="navigation"],[role="banner"]');
+      if (inChrome) return false;
+      const txt = String(el.innerText || '');
+      if (txt.trim().length < 12) return false;
+      return true;
+    });
+
+    const dedupe = new Set();
+    const items = [];
+    for (const el of roots) {
+      let item = null;
+      if (isAmazonSearch) {
+        const titleEl = el.querySelector('h2 a span, h2 span');
+        const title = String(titleEl?.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 280);
+        if (!title || /^results?$/i.test(title)) continue;
+        const text = String(el.innerText || '').replace(/\s+/g, ' ').trim();
+        let price = extractPriceFromText(text);
+        if (price.value === null) {
+          const priceText = String(el.querySelector('.a-price .a-offscreen')?.textContent || '').trim();
+          if (priceText) price = extractPriceFromText(priceText);
+        }
+        const rating = extractRatingFromText(text);
+        item = {
+          title,
+          price_value: typeof price.value === 'number' ? price.value : null,
+          price_currency: price.currency || '',
+          rating_value: typeof rating.value === 'number' ? rating.value : null,
+          rating_count: typeof rating.count === 'number' ? rating.count : null,
+          url: extractCanonicalUrl(el, activeView.location.href),
+          image: el.querySelector('img[src]')?.getAttribute('src') || '',
+        };
+        item.confidence = scoreItem(item);
+      } else {
+        item = buildStructuredItem(el, activeView);
+      }
+      if (!item) continue;
+      if (wantsProducts && item.price_value === null && item.rating_value === null) continue;
+      if (/^results?$/i.test(String(item.title || '').trim())) continue;
+      const dedupeKey = item.url || item.title;
+      if (!dedupeKey) continue;
+      if (dedupe.has(dedupeKey)) continue;
+      dedupe.add(dedupeKey);
+      items.push(item);
+      if (items.length >= maxItems) break;
+    }
+
+    if (isAmazonSearch && items.length === 0) {
+      const fromTitleNodes = extractAmazonItemsFromTitleNodes(activeDoc, activeView, maxItems, dedupe);
+      for (const item of fromTitleNodes) {
+        items.push(item);
+        if (items.length >= maxItems) break;
+      }
+    }
+
+    if (isAmazonSearch && items.length === 0) {
+      const pageTextResult = getPageText({ scope: 'full', maxChars: 30000 });
+      const fromText = parseAmazonItemsFromText(pageTextResult?.text || '', maxItems, dedupe);
+      for (const item of fromText) {
+        items.push(item);
+        if (items.length >= maxItems) break;
+      }
+    }
+
+    return {
+      success: true,
+      page_url: activeView.location.href,
+      title: activeDoc.title,
+      frame: activeFrameLabel,
+      hint,
+      selectorUsed: selector || '',
+      count: items.length,
+      items,
     };
   }
 
@@ -477,6 +953,16 @@
       case 'click': {
         const el = findElementById(target);
         if (!el) return makeError(ACTION_ERROR.ELEMENT_NOT_FOUND, `Element [${target}] not found`, { target });
+        // CSP-safe guard: avoid clicking javascript: links which are blocked in extensions.
+        const link = el.closest?.('a[href]') || (el.tagName === 'A' ? el : null);
+        const href = link?.getAttribute?.('href')?.trim() || '';
+        if (/^javascript\s*:/i.test(href)) {
+          return makeError(
+            ACTION_ERROR.INVALID_ACTION,
+            `Blocked click on javascript: URL for [${target}]. Use a real link or another interaction method.`,
+            { target, href },
+          );
+        }
         if (isSensitiveElement(el) && !params?.confirm) {
           return makeError(
             ACTION_ERROR.CONFIRMATION_REQUIRED,
@@ -818,11 +1304,15 @@
 
       const rect = el.getBoundingClientRect();
       const agentId = ensureAgentId(el);
+      const inputType = el.tagName.toLowerCase() === 'input'
+        ? String(el.getAttribute('type') || el.type || '').toLowerCase()
+        : '';
       candidates.push({
         agentId,
         tag: el.tagName.toLowerCase(),
         text: el.innerText?.trim().slice(0, 60),
         role: getElementRole(el),
+        inputType,
         score: Math.round(score * 100) / 100,
         rect: { x: Math.round(rect.x), y: Math.round(rect.y), w: Math.round(rect.width), h: Math.round(rect.height) },
       });
@@ -934,8 +1424,8 @@
 
   function buildTextMatch(node, idx, queryLength, doc) {
     const raw = node.nodeValue || '';
-    const start = Math.max(0, idx - 40);
-    const end = Math.min(raw.length, idx + queryLength + 40);
+    const start = Math.max(0, idx - 150);
+    const end = Math.min(raw.length, idx + queryLength + 150);
     const context = raw.slice(start, end).replace(/\s+/g, ' ').trim();
     const parent = node.parentElement;
     let rect = null;
@@ -1181,7 +1671,10 @@
           sendResponse(extractAccessibilityTree(payload));
           break;
         case 'getPageText':
-          sendResponse(getPageText());
+          sendResponse(getPageText(payload));
+          break;
+        case 'extractStructured':
+          sendResponse(extractStructured(payload));
           break;
         case 'executeAction':
           sendResponse(executeAction(payload));

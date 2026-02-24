@@ -20,7 +20,7 @@ const PROVIDER_CLASSES = {
 };
 
 const DEFAULT_CONFIG = {
-  primary: 'fireworks',
+  primary: 'ollama',
   fallbackOrder: [],
   providers: {
     fireworks: {

@@ -91,12 +91,20 @@ export class BaseLLMProvider {
     const message = response.choices?.[0]?.message;
     if (!message?.tool_calls) return [];
     return message.tool_calls.map((tc) => {
-      const rawArgs = tc?.function?.arguments ?? '{}';
+      const rawArgs = tc?.function?.arguments ?? {};
       try {
+        let parsedArgs = {};
+        if (rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs)) {
+          parsedArgs = rawArgs;
+        } else if (typeof rawArgs === 'string') {
+          parsedArgs = JSON.parse(rawArgs || '{}');
+        } else {
+          parsedArgs = {};
+        }
         return {
           id: tc.id,
           name: tc.function.name,
-          arguments: JSON.parse(rawArgs),
+          arguments: parsedArgs,
         };
       } catch (err) {
         void err;
