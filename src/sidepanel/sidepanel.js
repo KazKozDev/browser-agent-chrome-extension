@@ -43,6 +43,7 @@ const connRoutingList = document.getElementById('connRoutingList');
 const btnAddCustomConnection = document.getElementById('btnAddCustomConnection');
 const connectorQuickActions = document.getElementById('connectorQuickActions');
 const shortcutsDropdown = document.getElementById('shortcutsDropdown');
+const appVersion = document.getElementById('appVersion');
 
 // ===== State =====
 let port = null;
@@ -102,6 +103,17 @@ function sendMsg(msg) {
 
 function requestActiveTabContext() {
   sendMsg({ type: 'getActiveTabContext' });
+}
+
+function renderAppVersion() {
+  if (!appVersion) return;
+  try {
+    const version = String(chrome?.runtime?.getManifest?.()?.version || '').trim();
+    if (!version) return;
+    appVersion.textContent = `v${version}`;
+  } catch {
+    // Keep fallback text from HTML.
+  }
 }
 
 btnClose?.addEventListener('click', () => {
@@ -488,6 +500,7 @@ function connect() {
 }
 
 connect();
+renderAppVersion();
 
 // ===== Task Execution =====
 
