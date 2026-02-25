@@ -5,11 +5,13 @@
 # Browser Agent (Beta) — Chrome Extension
 
 [![Release](https://img.shields.io/github/v/release/KazKozDev/browser-agent-chrome-extension?label=release)](https://github.com/KazKozDev/browser-agent-chrome-extension/releases)
-[![Status](https://img.shields.io/badge/status-Public%20Beta-orange)](https://github.com/KazKozDev/browser-agent-chrome-extension/releases/tag/v1.0.1)
+[![Status](https://img.shields.io/badge/status-Public%20Beta-orange)](https://github.com/KazKozDev/browser-agent-chrome-extension/releases/tag/v1.0.2)
 [![Chrome](https://img.shields.io/badge/chrome-MV3-4285F4?logo=googlechrome&logoColor=white)](https://developer.chrome.com/docs/extensions/develop/migrate/what-is-mv3)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 AI-powered browser automation for Chrome. Give it a goal — it navigates, clicks, reads pages, calls APIs, and reports back.
+
+Latest stable build: **v1.0.2**
 
 ## Screenshot
 
@@ -23,8 +25,9 @@ AI-powered browser automation for Chrome. Give it a goal — it navigates, click
 ## Features
 
 ### Browsing & Navigation
-- Open any URL and navigate back.
-- Open, list and switch tabs; agent tabs auto-grouped as "Browser Agent".
+- Open any URL and navigate back/forward/reload.
+- Open, list, switch and close tabs; agent tabs auto-grouped as "Browser Agent".
+- Switch between main document and iframes (`switch_frame`).
 - Restore previously captured page state via snapshots (URL/cookies/scroll).
 
 ### Page Interaction
@@ -60,7 +63,9 @@ AI-powered browser automation for Chrome. Give it a goal — it navigates, click
 - Login, CAPTCHA and sensitive-action detection — agent pauses for manual help.
 
 ### Efficiency
-- Duplicate tool call detection — blocks repeated identical calls and suggests alternatives.
+- Duplicate and semantic-repeat detection — blocks repeated identical/low-signal loops and suggests alternatives.
+- SERP loop guard — forces exit from search-result loops to target pages.
+- Early token burn-rate guard — pauses before budget exhaustion to avoid dead-end runs.
 - Result banner with metrics: steps, time, errors, duplicates.
 - Task history with performance data (steps, duration, errors).
 
@@ -98,6 +103,8 @@ src/
 | `screenshot` | Capture screenshot (optional Set-of-Mark overlays) |
 | `navigate` | Open URL (blocklist-checked) |
 | `back` | Browser history back |
+| `forward` | Browser history forward |
+| `reload` | Reload active tab |
 | `click` | Click element IDs (single/double/triple, left/right/middle) |
 | `type` | Type text into one or multiple fields |
 | `scroll` | Scroll page up/down |
@@ -109,6 +116,8 @@ src/
 | `open_tab` | Open new tab |
 | `list_tabs` | List tabs in current window |
 | `switch_tab` | Switch active tab by ID/index |
+| `close_tab` | Close active tab or tab by ID |
+| `switch_frame` | Switch to main document or iframe by id/name/index |
 | `restore_snapshot` | Roll back state snapshot (URL/cookies/scroll) |
 | `http_request` | HTTP request to external APIs/webhooks |
 | `notify_connector` | Send message to a configured connector |
@@ -212,6 +221,7 @@ Manifest V3 permissions:
 - **400 tool_use_failed**: invalid tool arguments; retry with correct types.
 - **Agent loops too long**: use a more specific goal; check history metrics for inefficiency.
 - **Login/CAPTCHA**: complete manually, then click Resume.
+- **JS permission prompt**: click **Allow** to continue on that domain, or **Block** to deny scripts.
 
 ## Known Limitations
 

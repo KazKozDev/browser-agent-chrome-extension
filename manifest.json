@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Browser Agent",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Tell your browser what to do — it does the rest. Public Beta.",
   "permissions": [
     "activeTab",
