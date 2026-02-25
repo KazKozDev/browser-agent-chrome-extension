@@ -10,29 +10,25 @@ function debugWarn(context, err) {
   if (now - last < WARN_THROTTLE_MS) return;
   warnTimestamps.set(key, now);
   const message = err?.message || String(err || 'unknown error');
-  console.warn(`[GroqProvider] ${key}: ${message}`);
+  console.warn(`[XAIProvider] ${key}: ${message}`);
 }
 
 /**
- * Groq Provider (OpenAI-compatible)
+ * xAI Provider (OpenAI-compatible)
  *
  * API: OpenAI-compatible
- * Vision: Native multimodal (model-dependent)
- * Tools: Function calling supported
- * Price: ~$0.11 / 1M input, ~$0.34 / 1M output
- * Docs: https://console.groq.com/
+ * Model: grok-4-1-fast-non-reasoning
+ * Docs: https://docs.x.ai/
  */
-export class GroqProvider extends BaseLLMProvider {
+export class XAIProvider extends BaseLLMProvider {
   constructor(config = {}) {
     super(config);
-    this.name = 'groq';
-    this.baseUrl = config.baseUrl || 'https://api.groq.com/openai/v1';
-    this.model = config.model || 'meta-llama/llama-4-scout-17b-16e-instruct';
+    this.name = 'xai';
+    this.baseUrl = config.baseUrl || 'https://api.x.ai/v1';
+    this.model = config.model || 'grok-4-1-fast-non-reasoning';
     this.supportsVision = true;
     this.supportsTools = true;
-    this.enableThinking = config.enableThinking ?? false;
-    // temperature 0.0 — determinism for agentic tasks (Meta + browser-use recommendation)
-    this.temperature = config.temperature ?? 0.0;
+    this.temperature = config.temperature ?? 0.7;
   }
 
   async chat(messages, tools = [], options = {}) {
@@ -47,10 +43,6 @@ export class GroqProvider extends BaseLLMProvider {
     if (tools.length > 0) {
       body.tools = this.formatTools(tools);
       body.tool_choice = options.toolChoice || 'auto';
-    }
-
-    if (this.enableThinking) {
-      body.extra_body = { enable_thinking: true };
     }
 
     let response;
@@ -77,7 +69,7 @@ export class GroqProvider extends BaseLLMProvider {
       const url = `${this.baseUrl}/models`;
       const headers = {};
       if (this.apiKey) {
-        headers['Authorization'] = `Bearer ${this.apiKey}`;
+        headers.Authorization = `Bearer ${this.apiKey}`;
       }
       const controller = new AbortController();
       const tid = setTimeout(() => controller.abort(), 10000);

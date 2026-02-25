@@ -7,18 +7,30 @@
     "activeTab",
     "scripting",
     "tabs",
+    "declarativeNetRequest",
     "downloads",
     "sidePanel",
     "storage",
+    "cookies",
     "unlimitedStorage",
     "alarms",
     "notifications",
     "tabGroups"
   ],
   "host_permissions": [
+    "<all_urls>",
     "http://*/*",
     "https://*/*"
   ],
+  "declarative_net_request": {
+    "rule_resources": [
+      {
+        "id": "tracker_blocker",
+        "enabled": false,
+        "path": "src/rules/tracker_rules.json"
+      }
+    ]
+  },
   "minimum_chrome_version": "114",
   "background": {
     "service_worker": "src/background/service-worker.js",

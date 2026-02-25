@@ -2,6 +2,7 @@ import { FireworksProvider } from './fireworks.js';
 import { GroqProvider } from './groq.js';
 import { OllamaProvider } from './ollama.js';
 import { SiliconFlowProvider } from './siliconflow.js';
+import { XAIProvider } from './xai.js';
 
 /**
  * Provider Manager
@@ -15,12 +16,13 @@ import { SiliconFlowProvider } from './siliconflow.js';
 const PROVIDER_CLASSES = {
   fireworks: FireworksProvider,
   siliconflow: SiliconFlowProvider,
+  xai: XAIProvider,
   groq: GroqProvider,
   ollama: OllamaProvider,
 };
 
 const DEFAULT_CONFIG = {
-  primary: 'fireworks',
+  primary: 'ollama',
   fallbackOrder: [],
   providers: {
     fireworks: {
@@ -33,10 +35,15 @@ const DEFAULT_CONFIG = {
       baseUrl: 'https://api.siliconflow.com/v1',
       model: 'zai-org/GLM-4.6V',
     },
+    xai: {
+      apiKey: '',
+      baseUrl: 'https://api.x.ai/v1',
+      model: 'grok-4-1-fast-non-reasoning',
+    },
     groq: {
       apiKey: '',
       baseUrl: 'https://api.groq.com/openai/v1',
-      model: 'meta-llama/llama-4-maverick-17b-128e-instruct',
+      model: 'meta-llama/llama-4-scout-17b-16e-instruct',
     },
     ollama: {
       baseUrl: 'http://localhost:11434/v1',
@@ -107,6 +114,9 @@ export class ProviderManager {
     }
     if (this.config.providers.siliconflow?.model === 'Qwen/Qwen3-VL-32B-Instruct') {
       this.config.providers.siliconflow.model = 'zai-org/GLM-4.6V';
+    }
+    if (this.config.providers.groq?.model === 'meta-llama/llama-4-maverick-17b-128e-instruct') {
+      this.config.providers.groq.model = 'meta-llama/llama-4-scout-17b-16e-instruct';
     }
 
     if (!allowed.has(this.config.primary)) {
@@ -228,15 +238,15 @@ export class ProviderManager {
         note: 'Flagship agentic model with thinking mode. 262K context.',
         tier: 'recommended',
       },
-      groq: {
-        label: 'Llama 4 Maverick',
-        pricing: '$0.20 in / $0.60 out',
-        costPerMTokenIn: 0.20,
-        costPerMTokenOut: 0.60,
+      xai: {
+        label: 'Grok 4.1 Fast',
+        pricing: 'See xAI pricing',
+        costPerMTokenIn: 0,
+        costPerMTokenOut: 0,
         vision: true,
         tools: true,
-        signupUrl: 'https://console.groq.com/keys',
-        note: 'Fast Groq inference. 17Bx128E MoE, 128K context.',
+        signupUrl: 'https://console.x.ai/',
+        note: 'Model: grok-4-1-fast-non-reasoning. API base: https://api.x.ai/v1.',
         tier: 'budget',
       },
       ollama: {

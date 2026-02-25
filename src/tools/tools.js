@@ -21,10 +21,45 @@ export const TOOLS = [
   },
   {
     name: 'get_page_text',
-    description: 'Get the raw text content of the page. Use for text-heavy pages like articles, docs, or when you need to read the full content.',
+    description: 'Get text content from the page. Supports full-page, viewport-only, or CSS-selector scoped extraction.',
     parameters: {
       type: 'object',
-      properties: {},
+      properties: {
+        scope: {
+          type: 'string',
+          enum: ['full', 'viewport', 'selector'],
+          description: 'Extraction scope: full page (default), only visible viewport, or specific CSS selector.',
+        },
+        selector: {
+          type: 'string',
+          description: 'CSS selector used when scope=selector (e.g. ".result-item, article").',
+        },
+        maxChars: {
+          type: 'integer',
+          description: 'Maximum number of characters to return (default 15000, max 50000).',
+        },
+      },
+    },
+  },
+  {
+    name: 'extract_structured',
+    description: 'Extract repeated content blocks (products/results/cards) into structured JSON objects with fields like title, price, rating, and url.',
+    parameters: {
+      type: 'object',
+      properties: {
+        hint: {
+          type: 'string',
+          description: 'Optional hint for target list type, e.g. "item cards", "search results", "table rows".',
+        },
+        selector: {
+          type: 'string',
+          description: 'Optional CSS selector for list item roots. If omitted, heuristics are used.',
+        },
+        maxItems: {
+          type: 'integer',
+          description: 'Maximum number of extracted items (default 30, max 100).',
+        },
+      },
     },
   },
   {
@@ -58,10 +93,19 @@ export const TOOLS = [
   },
   {
     name: 'screenshot',
-    description: 'Take a screenshot of the current tab. The image will be sent to the LLM as a vision message for visual understanding.',
+    description: 'Take a screenshot of the current tab. By default adds Set-of-Mark overlays (numbered boxes) matching agent IDs to improve visual grounding.',
     parameters: {
       type: 'object',
-      properties: {},
+      properties: {
+        som: {
+          type: ['boolean', 'string'],
+          description: 'Enable Set-of-Mark numbered overlays (default true). Set false for raw screenshot.',
+        },
+        maxMarks: {
+          type: 'integer',
+          description: 'Maximum overlay marks to render (default 24, max 80).',
+        },
+      },
     },
   },
 
@@ -85,15 +129,33 @@ export const TOOLS = [
       properties: {},
     },
   },
+  {
+    name: 'forward',
+    description: 'Go forward in browser history for the current tab.',
+    parameters: {
+      type: 'object',
+      properties: {},
+    },
+  },
+  {
+    name: 'reload',
+    description: 'Reload the current tab.',
+    parameters: {
+      type: 'object',
+      properties: {
+        bypassCache: { type: ['boolean', 'string'], description: 'If true, bypass browser cache while reloading.' },
+      },
+    },
+  },
 
   // ── Interaction ─────────────────────────────────────────────────
   {
     name: 'click',
-    description: 'Click on an interactive element by its [id]. Supports left/right/middle button and single/double/triple click via optional params.',
+    description: 'Click on one or multiple interactive elements by their [id]. To click multiple elements in sequence, pass an array of IDs.',
     parameters: {
       type: 'object',
       properties: {
-        target: { type: ['integer', 'string'], description: 'Element agent ID (the [N] number)' },
+        target: { type: ['integer', 'string', 'array'], items: { type: ['integer', 'string'] }, description: 'Element agent ID (the [N] number), or array of IDs' },
         button: { type: 'string', enum: ['left', 'right', 'middle'], description: 'Mouse button (default left)' },
         clickCount: { type: 'integer', description: 'Number of clicks: 1 (single), 2 (double), 3 (triple). Default 1.' },
         confirm: { type: ['boolean', 'string'], description: 'Set true for sensitive actions (submit/delete/pay/send)' },
@@ -103,12 +165,12 @@ export const TOOLS = [
   },
   {
     name: 'type',
-    description: 'Type text into an input field. Clears existing value first. Set enter=true to submit the form after typing.',
+    description: 'Type text into one or multiple input fields. Pass arrays for target and text to fill multiple fields at once. Clears existing value first. Set enter=true to submit the form after typing.',
     parameters: {
       type: 'object',
       properties: {
-        target: { type: ['integer', 'string'], description: 'Element agent ID for the input field' },
-        text: { type: 'string', description: 'Text to type' },
+        target: { type: ['integer', 'string', 'array'], items: { type: ['integer', 'string'] }, description: 'Element agent ID for the input field, or array of IDs' },
+        text: { type: ['string', 'array'], items: { type: 'string' }, description: 'Text to type, or array of texts' },
         enter: { type: ['boolean', 'string'], description: 'If true, press Enter after typing to submit the form' },
       },
       required: ['target', 'text'],
@@ -231,6 +293,42 @@ export const TOOLS = [
       },
     },
   },
+  {
+    name: 'close_tab',
+    description: 'Close a tab by tab ID, or close the current tab when tabId is omitted.',
+    parameters: {
+      type: 'object',
+      properties: {
+        tabId: { type: ['integer', 'string'], description: 'Tab ID to close. Defaults to current tab.' },
+      },
+    },
+  },
+  {
+    name: 'switch_frame',
+    description: 'Switch active iframe context for subsequent page tools. Use main=true to return to the top document.',
+    parameters: {
+      type: 'object',
+      properties: {
+        main: { type: ['boolean', 'string'], description: 'If true, switch to the top/main document.' },
+        target: { type: ['integer', 'string'], description: 'Iframe target by agent [id] or frame label string.' },
+        index: { type: ['integer', 'string'], description: '0-based index of accessible iframe in discovery order.' },
+      },
+    },
+  },
+  {
+    name: 'restore_snapshot',
+    description: 'Restore a previously captured browser state snapshot (URL, cookies, scroll position). Use after risky actions when the page state needs rollback.',
+    parameters: {
+      type: 'object',
+      properties: {
+        snapshotId: { type: 'string', description: 'Snapshot ID to restore. If omitted, restores latest snapshot.' },
+        index: { type: ['integer', 'string'], description: 'Relative index from latest snapshot: 0 = latest, 1 = previous, etc.' },
+        restoreUrl: { type: ['boolean', 'string'], description: 'Whether to restore URL/navigation state (default true).' },
+        restoreCookies: { type: ['boolean', 'string'], description: 'Whether to restore cookies for the snapshot URL (default true).' },
+        restoreScroll: { type: ['boolean', 'string'], description: 'Whether to restore scroll position (default true).' },
+      },
+    },
+  },
 
   // ── External ────────────────────────────────────────────────────
   {
@@ -249,6 +347,18 @@ export const TOOLS = [
       },
     },
   },
+  {
+    name: 'notify_connector',
+    description: 'Send a message to a connected integration (telegram, notion, slack, discord, airtable, sheets, email, or custom webhook) during task execution.',
+    parameters: {
+      type: 'object',
+      properties: {
+        connectorId: { type: 'string', description: 'Connected integration ID, e.g. "telegram", "notion", "slack".' },
+        message: { type: 'string', description: 'Message text/content to deliver to the connector.' },
+      },
+      required: ['connectorId', 'message'],
+    },
+  },
 
   // ── Completion ──────────────────────────────────────────────────
   {
@@ -261,6 +371,17 @@ export const TOOLS = [
         answer: { type: 'string', description: 'The actual answer/information extracted from the page. Required for information/search tasks. Include the full relevant text.' },
       },
       required: ['summary'],
+    },
+  },
+  {
+    name: 'save_progress',
+    description: 'Save intermediate findings into persistent task scratchpad memory so they remain available across future steps.',
+    parameters: {
+      type: 'object',
+      properties: {
+        data: { description: 'Any JSON-serializable object to merge into accumulated progress.' },
+      },
+      required: ['data'],
     },
   },
   {
