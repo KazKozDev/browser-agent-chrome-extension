@@ -215,6 +215,10 @@ Manifest V3 permissions:
 - Login/CAPTCHA detection — agent pauses and waits for manual completion.
 - Console and network data collected only on demand.
 
+## Privacy
+
+- Privacy policy: [PRIVACY.md](PRIVACY.md)
+
 ## Troubleshooting
 
 - **429 rate limit**: wait for TPM/RPM reset or shorten prompts.
