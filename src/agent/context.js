@@ -7,6 +7,8 @@ const HISTORY_RAG_ENTRY_MAX_CHARS = 320;
 const HISTORY_RAG_EMBEDDING_DIM = 96;
 const HISTORY_RAG_QUERY_TOP_K = 4;
 const HISTORY_RAG_MIN_SCORE = 0.08;
+const HISTORY_KEEP_VISION_MESSAGES = 2;
+const HISTORY_VISION_SUMMARY_MAX_CHARS = 280;
 
 function tokenizeForEmbedding(text, maxTokens = 120) {
   const src = String(text || '').toLowerCase();
@@ -124,6 +126,33 @@ function contentToText(content) {
     if (typeof content.content === 'string') return content.content.trim();
   }
   return '';
+}
+
+function isVisionContent(content) {
+  return Array.isArray(content) && content.some((item) => item?.type === 'image_url');
+}
+
+function extractVisionPromptSummary(content, maxChars = HISTORY_VISION_SUMMARY_MAX_CHARS) {
+  if (!Array.isArray(content)) return '';
+  const text = content
+    .filter((item) => item && typeof item === 'object' && item.type === 'text')
+    .map((item) => String(item.text || '').trim())
+    .filter(Boolean)
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!text) return '';
+
+  let compact = text
+    .replace(/^Here is the screenshot of the current page\.?/i, '')
+    .replace(/\bDescribe what you see and decide the next action\.?$/i, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!compact) compact = text;
+  if (compact.length > maxChars) {
+    compact = `${compact.slice(0, maxChars).trim()}...`;
+  }
+  return compact;
 }
 
 function normalizeHistorySummaryState(raw) {
@@ -722,6 +751,7 @@ export const contextMethods = {
     if (messages.length <= 4) return;
 
     let assistantTurns = 0;
+    let keptVisionMessages = 0;
     // Iterate from newest to oldest
     for (let i = messages.length - 1; i >= 0; i--) {
       const msg = messages[i];
@@ -737,16 +767,24 @@ export const contextMethods = {
         continue;
       }
 
-      // Keep image payloads out of long-lived history to avoid wasting context budget.
-      // Text/tool payloads are now preserved until turn eviction, then summarized by Tier 2.
-      if (assistantTurns >= 2) {
-        if (msg.role === 'user' && Array.isArray(msg.content)) {
-          // It's a vision message (screenshot) from a past turn.
-          const hasImage = msg.content.some(c => c.type === 'image_url');
-          if (hasImage) {
-            msg.content = 'Screenshot omitted from history to save context. You already analyzed this view.';
-          }
+      // Keep only the N newest vision messages. Older screenshots are replaced with compact summaries
+      // to reduce token costs while preserving useful context.
+      if (msg.role === 'user' && isVisionContent(msg.content)) {
+        keptVisionMessages += 1;
+        const shouldOmit = keptVisionMessages > HISTORY_KEEP_VISION_MESSAGES || assistantTurns >= 2;
+        if (shouldOmit) {
+          const summary = extractVisionPromptSummary(msg.content);
+          const compact = summary
+            ? `Screenshot omitted from history to save context. Snapshot summary: ${summary}`
+            : 'Screenshot omitted from history to save context. Snapshot already analyzed.';
+          msg.content = compact;
+          const stepRaw = Number(this?.history?.[this.history.length - 1]?.step);
+          this._indexHistoryChunkForRetrieval(compact, {
+            source: 'vision_summary',
+            step: Number.isFinite(stepRaw) ? Math.floor(stepRaw) : null,
+          });
         }
+        continue;
       }
     }
   },

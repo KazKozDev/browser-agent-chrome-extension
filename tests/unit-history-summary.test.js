@@ -72,6 +72,35 @@ test('appendMessage keeps raw tool payload for Tier 2 summary before eviction', 
   assert.doesNotMatch(pendingText, /Page state omitted/i);
 });
 
+test('compressHistory keeps only two latest vision messages and summarizes older screenshots', () => {
+  const agent = makeAgent();
+  const mkVision = (label) => ([
+    { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${label}` } },
+    { type: 'text', text: `Here is the screenshot of the current page. ${label}. Describe what you see and decide the next action.` },
+  ]);
+  const messages = [
+    { role: 'system', content: 'sys' },
+    { role: 'user', content: 'task' },
+    { role: 'assistant', content: 'step 1' },
+    { role: 'user', content: mkVision('vision one') },
+    { role: 'assistant', content: 'step 2' },
+    { role: 'user', content: mkVision('vision two') },
+    { role: 'assistant', content: 'step 3' },
+    { role: 'user', content: mkVision('vision three') },
+  ];
+
+  agent._compressHistory(messages);
+
+  assert.equal(Array.isArray(messages[7].content), true);
+  assert.equal(Array.isArray(messages[5].content), true);
+  assert.equal(typeof messages[3].content, 'string');
+  assert.match(String(messages[3].content || ''), /Snapshot summary:/i);
+
+  const state = agent._ensureHistorySummaryState();
+  assert.ok(Array.isArray(state.ragEntries));
+  assert.ok(state.ragEntries.some((entry) => /Snapshot summary:/i.test(String(entry?.text || ''))));
+});
+
 test('maybeSummarizeHistory merges pending chunks using provider', async () => {
   const agent = makeAgent();
   agent.provider = {

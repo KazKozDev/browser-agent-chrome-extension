@@ -2038,8 +2038,10 @@ export class Agent {
    */
   async _takeScreenshot(args = {}) {
     try {
-      const wantSom = this._normalizeBoolean(args?.som) !== false;
+      const wantSom = args?.som === undefined ? true : this._normalizeBoolean(args?.som) === true;
+      const autoCrop = args?.autoCrop === undefined ? true : this._normalizeBoolean(args?.autoCrop) === true;
       const maxMarks = Math.min(Math.max(Number(args?.maxMarks) || 24, 4), 80);
+      const profile = this._getScreenshotOptimizationProfile(args);
       let overlayMarks = [];
 
       if (wantSom) {
@@ -2089,23 +2091,41 @@ export class Agent {
       const response = await fetch(dataUrl);
       const blob = await response.blob();
       const bitmap = await createImageBitmap(blob);
-      const MAX_WIDTH = 1280;
-      let width = bitmap.width;
-      let height = bitmap.height;
-      if (width > MAX_WIDTH) {
-        height = Math.round((height * MAX_WIDTH) / width);
-        width = MAX_WIDTH;
-      }
+      const cropRect = this._resolveScreenshotCropRect(
+        bitmap.width,
+        bitmap.height,
+        overlayMarks,
+        args,
+        autoCrop,
+      );
+      const source = cropRect || { x: 0, y: 0, w: bitmap.width, h: bitmap.height };
+      const fitted = this._fitScreenshotDimensions(source.w, source.h, profile);
+      const width = fitted.width;
+      const height = fitted.height;
       const canvas = new OffscreenCanvas(width, height);
       const ctx = canvas.getContext('2d');
-      ctx.drawImage(bitmap, 0, 0, width, height);
-      if (ctx && overlayMarks.length > 0) {
-        const scaleX = width / bitmap.width;
-        const scaleY = height / bitmap.height;
-        this._drawSomOverlay(ctx, overlayMarks, scaleX, scaleY, width, height);
+      ctx.drawImage(
+        bitmap,
+        source.x,
+        source.y,
+        source.w,
+        source.h,
+        0,
+        0,
+        width,
+        height,
+      );
+      const visibleMarks = this._projectSomMarksToCrop(overlayMarks, cropRect).slice(0, maxMarks);
+      const scaleX = width / Math.max(source.w, 1);
+      const scaleY = height / Math.max(source.h, 1);
+      if (ctx && visibleMarks.length > 0) {
+        this._drawSomOverlay(ctx, visibleMarks, scaleX, scaleY, width, height);
       }
 
-      const resizedBlob = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.6 });
+      const resizedBlob = await canvas.convertToBlob({
+        type: 'image/jpeg',
+        quality: profile.quality,
+      });
       const buffer = await resizedBlob.arrayBuffer();
 
       const chunks = [];
@@ -2115,18 +2135,25 @@ export class Agent {
       }
       const base64 = btoa(chunks.join(''));
       const summarizedSom = this._summarizeSomForPrompt({
-        markCount: overlayMarks.length,
-        marks: overlayMarks,
+        markCount: visibleMarks.length,
+        marks: this._projectSomMarksToOutput(visibleMarks, scaleX, scaleY),
       });
 
       return {
         success: true,
         imageBase64: base64,
         format: 'jpeg',
+        image: {
+          width,
+          height,
+          sourceWidth: source.w,
+          sourceHeight: source.h,
+          cropped: !!cropRect,
+        },
         som: wantSom ? {
           enabled: true,
-          markCount: overlayMarks.length,
-          marks: overlayMarks.slice(0, 12),
+          markCount: visibleMarks.length,
+          marks: this._projectSomMarksToOutput(visibleMarks, scaleX, scaleY).slice(0, 12),
           legend: summarizedSom?.legend || '',
         } : {
           enabled: false,
@@ -2145,6 +2172,189 @@ export class Agent {
       }
       return this._makeError('SCREENSHOT_FAILED', `Screenshot failed: ${err.message}`);
     }
+  }
+
+  _getScreenshotOptimizationProfile(args = {}) {
+    const primary = String(this?.provider?.config?.primary || '').toLowerCase();
+    const model = String(this?.provider?.currentProvider?.model || '').toLowerCase();
+    let maxWidth = 1280;
+    let maxHeight = 1280;
+    let maxPixels = 1_250_000;
+    let quality = 0.6;
+
+    if (primary === 'ollama' || /qwen|llama|scout|8b|7b/.test(model)) {
+      maxWidth = 1024;
+      maxHeight = 1024;
+      maxPixels = 900_000;
+      quality = 0.55;
+    }
+
+    const userMaxWidth = Number(args?.maxWidth);
+    const userMaxHeight = Number(args?.maxHeight);
+    const userQuality = Number(args?.quality);
+    if (Number.isFinite(userMaxWidth)) {
+      maxWidth = Math.min(Math.max(Math.round(userMaxWidth), 512), 1920);
+    }
+    if (Number.isFinite(userMaxHeight)) {
+      maxHeight = Math.min(Math.max(Math.round(userMaxHeight), 512), 1920);
+    }
+    if (Number.isFinite(userQuality)) {
+      quality = Math.min(Math.max(userQuality, 0.4), 0.85);
+    }
+
+    return {
+      maxWidth,
+      maxHeight,
+      maxPixels,
+      quality,
+    };
+  }
+
+  _fitScreenshotDimensions(sourceWidth, sourceHeight, profile = {}) {
+    const srcW = Math.max(Math.round(Number(sourceWidth) || 1), 1);
+    const srcH = Math.max(Math.round(Number(sourceHeight) || 1), 1);
+    const maxWidth = Math.max(Math.round(Number(profile.maxWidth) || 1280), 1);
+    const maxHeight = Math.max(Math.round(Number(profile.maxHeight) || 1280), 1);
+    const maxPixels = Math.max(Number(profile.maxPixels) || 1_250_000, 1);
+
+    const byWidth = maxWidth / srcW;
+    const byHeight = maxHeight / srcH;
+    const byPixels = Math.sqrt(maxPixels / Math.max(srcW * srcH, 1));
+    const scale = Math.min(1, byWidth, byHeight, byPixels);
+
+    return {
+      width: Math.max(Math.round(srcW * scale), 1),
+      height: Math.max(Math.round(srcH * scale), 1),
+    };
+  }
+
+  _normalizeScreenshotCropRect(raw, imageWidth, imageHeight) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+    const x = Number(raw.x);
+    const y = Number(raw.y);
+    const w = Number(raw.w ?? raw.width);
+    const h = Number(raw.h ?? raw.height);
+    if (![x, y, w, h].every(Number.isFinite)) return null;
+
+    const left = Math.max(Math.min(Math.round(x), imageWidth - 1), 0);
+    const top = Math.max(Math.min(Math.round(y), imageHeight - 1), 0);
+    const right = Math.max(Math.min(Math.round(x + w), imageWidth), left + 1);
+    const bottom = Math.max(Math.min(Math.round(y + h), imageHeight), top + 1);
+    if ((right - left) < 40 || (bottom - top) < 40) return null;
+    return {
+      x: left,
+      y: top,
+      w: right - left,
+      h: bottom - top,
+      reason: 'explicit',
+    };
+  }
+
+  _resolveScreenshotCropRect(imageWidth, imageHeight, marks = [], args = {}, autoCrop = true) {
+    const explicit = this._normalizeScreenshotCropRect(args?.crop, imageWidth, imageHeight);
+    if (explicit) return explicit;
+    if (!autoCrop) return null;
+    if (!Array.isArray(marks) || marks.length < 2) return null;
+
+    const validMarks = marks
+      .map((mark) => ({
+        x: Number(mark?.x),
+        y: Number(mark?.y),
+        w: Number(mark?.w),
+        h: Number(mark?.h),
+      }))
+      .filter((mark) => Number.isFinite(mark.x)
+        && Number.isFinite(mark.y)
+        && Number.isFinite(mark.w)
+        && Number.isFinite(mark.h)
+        && mark.w > 2
+        && mark.h > 2);
+
+    if (validMarks.length < 2) return null;
+
+    let minX = imageWidth;
+    let minY = imageHeight;
+    let maxX = 0;
+    let maxY = 0;
+    for (const mark of validMarks) {
+      minX = Math.min(minX, mark.x);
+      minY = Math.min(minY, mark.y);
+      maxX = Math.max(maxX, mark.x + mark.w);
+      maxY = Math.max(maxY, mark.y + mark.h);
+    }
+
+    const boundsW = Math.max(maxX - minX, 1);
+    const boundsH = Math.max(maxY - minY, 1);
+    const coverage = (boundsW * boundsH) / Math.max(imageWidth * imageHeight, 1);
+    if (coverage >= 0.88) return null;
+
+    const margin = Math.max(Math.min(Math.round(Math.max(boundsW, boundsH) * 0.12), 160), 24);
+    const x = Math.max(Math.round(minX - margin), 0);
+    const y = Math.max(Math.round(minY - margin), 0);
+    const right = Math.min(Math.round(maxX + margin), imageWidth);
+    const bottom = Math.min(Math.round(maxY + margin), imageHeight);
+    const w = Math.max(right - x, 1);
+    const h = Math.max(bottom - y, 1);
+    const cropCoverage = (w * h) / Math.max(imageWidth * imageHeight, 1);
+    if (w < 40 || h < 40 || cropCoverage >= 0.95) return null;
+
+    return { x, y, w, h, reason: 'som_bounds' };
+  }
+
+  _projectSomMarksToCrop(marks = [], cropRect = null) {
+    if (!Array.isArray(marks) || marks.length === 0) return [];
+    if (!cropRect) return marks.map((mark) => ({ ...mark }));
+
+    const cx1 = Number(cropRect.x) || 0;
+    const cy1 = Number(cropRect.y) || 0;
+    const cx2 = cx1 + Math.max(Number(cropRect.w) || 0, 0);
+    const cy2 = cy1 + Math.max(Number(cropRect.h) || 0, 0);
+    const projected = [];
+
+    for (const mark of marks) {
+      const id = Number(mark?.id);
+      const x = Number(mark?.x);
+      const y = Number(mark?.y);
+      const w = Number(mark?.w);
+      const h = Number(mark?.h);
+      if (!Number.isInteger(id) || !Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(w) || !Number.isFinite(h)) continue;
+      if (w <= 2 || h <= 2) continue;
+
+      const mx1 = x;
+      const my1 = y;
+      const mx2 = x + w;
+      const my2 = y + h;
+      const ix1 = Math.max(mx1, cx1);
+      const iy1 = Math.max(my1, cy1);
+      const ix2 = Math.min(mx2, cx2);
+      const iy2 = Math.min(my2, cy2);
+      if ((ix2 - ix1) <= 2 || (iy2 - iy1) <= 2) continue;
+
+      projected.push({
+        id,
+        label: String(mark?.label || '').slice(0, 120),
+        x: ix1 - cx1,
+        y: iy1 - cy1,
+        w: ix2 - ix1,
+        h: iy2 - iy1,
+      });
+    }
+
+    return projected;
+  }
+
+  _projectSomMarksToOutput(marks = [], scaleX = 1, scaleY = 1) {
+    if (!Array.isArray(marks) || marks.length === 0) return [];
+    const sx = Number.isFinite(Number(scaleX)) && Number(scaleX) > 0 ? Number(scaleX) : 1;
+    const sy = Number.isFinite(Number(scaleY)) && Number(scaleY) > 0 ? Number(scaleY) : 1;
+    return marks.map((mark) => ({
+      id: Number(mark.id),
+      label: String(mark.label || '').slice(0, 120),
+      x: Math.max(Math.round((Number(mark.x) || 0) * sx), 0),
+      y: Math.max(Math.round((Number(mark.y) || 0) * sy), 0),
+      w: Math.max(Math.round((Number(mark.w) || 0) * sx), 1),
+      h: Math.max(Math.round((Number(mark.h) || 0) * sy), 1),
+    })).filter((mark) => Number.isInteger(mark.id));
   }
 
   _summarizeSomForPrompt(som = null) {

@@ -105,6 +105,32 @@ export const TOOLS = [
           type: 'integer',
           description: 'Maximum overlay marks to render (default 24, max 80).',
         },
+        autoCrop: {
+          type: ['boolean', 'string'],
+          description: 'If true (default), auto-crop to the densest SoM interaction region when beneficial.',
+        },
+        crop: {
+          type: 'object',
+          description: 'Optional explicit crop rectangle in source pixels.',
+          properties: {
+            x: { type: 'number', description: 'Left coordinate in source pixels.' },
+            y: { type: 'number', description: 'Top coordinate in source pixels.' },
+            w: { type: 'number', description: 'Width in source pixels.' },
+            h: { type: 'number', description: 'Height in source pixels.' },
+          },
+        },
+        maxWidth: {
+          type: 'integer',
+          description: 'Optional output max width override (512-1920).',
+        },
+        maxHeight: {
+          type: 'integer',
+          description: 'Optional output max height override (512-1920).',
+        },
+        quality: {
+          type: 'number',
+          description: 'Optional JPEG quality override (0.4-0.85).',
+        },
       },
     },
   },

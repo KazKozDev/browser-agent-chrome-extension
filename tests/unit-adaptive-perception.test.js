@@ -105,3 +105,36 @@ test('summarizeSomForPrompt formats compact legend', () => {
   assert.match(summary.structuredJson, /"id":3/);
   assert.match(summary.structuredJson, /"x":24/);
 });
+
+test('resolveScreenshotCropRect derives focused crop from SoM marks', () => {
+  const agent = new Agent({ config: {}, currentProvider: { supportsVision: true } }, 1);
+  const rect = agent._resolveScreenshotCropRect(
+    1920,
+    1080,
+    [
+      { id: 1, x: 730, y: 280, w: 420, h: 42, label: 'email input' },
+      { id: 2, x: 730, y: 334, w: 420, h: 42, label: 'password input' },
+      { id: 3, x: 730, y: 394, w: 180, h: 40, label: 'login button' },
+    ],
+    {},
+    true,
+  );
+
+  assert.ok(rect);
+  assert.ok(rect.w < 1920);
+  assert.ok(rect.h < 1080);
+  assert.equal(rect.reason, 'som_bounds');
+});
+
+test('fitScreenshotDimensions respects max side and pixel budget', () => {
+  const agent = new Agent({ config: {}, currentProvider: { supportsVision: true } }, 1);
+  const fitted = agent._fitScreenshotDimensions(2560, 1600, {
+    maxWidth: 1280,
+    maxHeight: 1280,
+    maxPixels: 900000,
+  });
+
+  assert.ok(fitted.width <= 1280);
+  assert.ok(fitted.height <= 1280);
+  assert.ok((fitted.width * fitted.height) <= 900000);
+});
