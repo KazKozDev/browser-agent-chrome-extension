@@ -89,6 +89,9 @@ src/
 
 ## Tools
 
+<details>
+<summary>Show tools list</summary>
+
 | Tool | Description |
 |---|---|
 | `read_page` | Accessibility tree with interactive element IDs |
@@ -120,6 +123,8 @@ src/
 | `save_progress` | Persist intermediate task memory |
 | `fail` | Mark task failed |
 
+</details>
+
 ## Providers
 
 | Tier | Provider | Model | Pricing (per 1M tokens) |
@@ -134,14 +139,16 @@ All providers support vision and tool calling. Provider selection is primary-onl
 ## Install
 
 ### Option A: Download ZIP
-1. Go to `https://github.com/KazKozDev/browseagent-chrome-extension`.
-2. Click **Code** > **Download ZIP**, extract.
-3. Open `chrome://extensions/`, enable **Developer mode**.
-4. Click **Load unpacked**, select the folder with `manifest.json`.
+1. Go to `https://github.com/KazKozDev/browser-agent-chrome-extension`.
+2. Download `release/browseagent-v1.0.2-chrome-web-store.zip`:
+   `https://github.com/KazKozDev/browser-agent-chrome-extension/raw/main/release/browseagent-v1.0.2-chrome-web-store.zip`
+3. Extract the archive.
+4. Open `chrome://extensions/`, enable **Developer mode**.
+5. Click **Load unpacked**, select the folder with `manifest.json`.
 
 ### Option B: Clone
 ```bash
-git clone https://github.com/KazKozDev/browseagent-chrome-extension.git
+git clone https://github.com/KazKozDev/browser-agent-chrome-extension.git
 ```
 Then load unpacked in `chrome://extensions/`.
 
@@ -206,13 +213,6 @@ Manifest V3 permissions:
 ## Privacy
 
 - Privacy policy: [PRIVACY.md](PRIVACY.md)
-
-## Troubleshooting
-
-- **429 rate limit**: wait for TPM/RPM reset or shorten prompts.
-- **400 tool_use_failed**: invalid tool arguments; retry with correct types.
-- **Agent loops too long**: use a more specific goal; check history metrics for inefficiency.
-- **Login/CAPTCHA**: complete manually, then click Resume.
 
 ## Known Limitations
 
