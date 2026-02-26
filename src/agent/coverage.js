@@ -24,7 +24,7 @@ export const coverageMethods = {
     const successes = allActions.filter((a) => a.result?.success !== false);
     const reads = allActions.filter((a) =>
       a.result?.success !== false &&
-      ['get_page_text', 'read_page', 'find_text', 'find', 'extract_structured', 'javascript', 'navigate'].includes(a.tool),
+      ['get_page_text', 'read_page', 'find_text', 'find', 'extract_structured', 'navigate'].includes(a.tool),
     );
 
     // Guard 1: If zero successful actions (everything failed), reject unconditionally
@@ -34,7 +34,7 @@ export const coverageMethods = {
         result: {
           success: false,
           code: 'PREMATURE_DONE',
-          error: 'Completion rejected: every action you attempted has failed. Try a different approach: use read_page or get_page_text to understand the page, navigate to a different URL, or use javascript.',
+          error: 'Completion rejected: every action you attempted has failed. Try a different approach: use read_page or get_page_text to understand the page, navigate to a different URL, or use find to locate interactive targets.',
         },
       };
     }
@@ -46,7 +46,7 @@ export const coverageMethods = {
       const recentFailures = recentActions.filter((a) => a.result?.success === false);
       const recentReads = recentActions.filter((a) =>
         a.result?.success !== false &&
-        ['get_page_text', 'read_page', 'find_text', 'find', 'extract_structured', 'javascript'].includes(a.tool),
+        ['get_page_text', 'read_page', 'find_text', 'find', 'extract_structured'].includes(a.tool),
       );
       const failRatio = recentFailures.length / recentActions.length;
       if (failRatio >= 0.5 && recentReads.length === 0) {
@@ -72,7 +72,7 @@ export const coverageMethods = {
     if (!this._isNavigateOnly) {
       let lastNavigateIdx = -1;
       let hasPageReadAfterNavigate = false;
-      const readTools = new Set(['get_page_text', 'find_text', 'find', 'extract_structured', 'read_page', 'javascript']);
+      const readTools = new Set(['get_page_text', 'find_text', 'find', 'extract_structured', 'read_page']);
       for (let i = 0; i < this.history.length; i++) {
         const item = this.history[i];
         if (!item || item.type !== 'action') continue;
@@ -157,8 +157,8 @@ export const coverageMethods = {
     }
 
     const goalText = String(this._goal || '').toLowerCase();
-    const infoGoal = /(find|search|check|look\s*up|lookup|news|price|weather|who|what|when|where|сколько|какой|какая|какие|найди|проверь|узнай|новости|цена|курс)/i.test(goalText);
-    const processOnly = /(clicked|typed|navigated|opened|pressed|scrolled|переш[её]л|кликнул|нажал|ввел|вв[её]л|открыл|прокрутил|заполнил)/i.test(combined);
+    const infoGoal = /(find|search|check|look\s*up|lookup|news|price|weather|who|what|when|where|how\s+much|which|rate)/i.test(goalText);
+    const processOnly = /(clicked|typed|navigated|opened|pressed|scrolled|filled|submitted)/i.test(combined);
     const hasFactSignal = (
       /https?:\/\/\S+/i.test(combined) ||
       /[\p{N}]{2,}/u.test(combined) ||
@@ -461,13 +461,13 @@ export const coverageMethods = {
     protectedGoal = protectedGoal.replace(/"[^"]+"|'[^']+'|«[^»]+»|“[^”]+”/g, (m) => protectChunk(m));
 
     // Keep common "single intent with two entities" phrases intact:
-    // e.g. "цена macbook air и macbook pro", "compare x and y".
+    // e.g. "price macbook air and macbook pro", "compare x and y".
     protectedGoal = protectedGoal.replace(
-      /\b(?:цена|цену|цены|стоимость|сравни|compare|price|find)\s+([^\n,;:.]{2,80}?)\s+(?:и|and)\s+([^\n,;:.]{2,80}?)(?=(?:\s*(?:,|;|\.|\bthen\b|\band then\b|\bafter that\b|\balso\b|\bзатем\b|\bпотом\b|\bа также\b))|$)/gi,
+      /\b(?:price|cost|compare|find)\s+([^\n,;:.]{2,80}?)\s+(?:and)\s+([^\n,;:.]{2,80}?)(?=(?:\s*(?:,|;|\.|\bthen\b|\band then\b|\bafter that\b|\balso\b))|$)/gi,
       (m) => protectChunk(m),
     );
 
-    const separators = /(?:\s*(?:,|;|\.|\bthen\b|\band then\b|\bafter that\b|\band\b|\balso\b|\bи\b|\bзатем\b|\bпотом\b|\bа также\b)\s+)/i;
+    const separators = /(?:\s*(?:,|;|\.|\bthen\b|\band then\b|\bafter that\b|\band\b|\balso\b)\s+)/i;
     const parts = protectedGoal
       .split(separators)
       .map((p) => restoreChunks(p).trim())
@@ -486,8 +486,8 @@ export const coverageMethods = {
     const stopwords = new Set([
       'the', 'and', 'then', 'with', 'from', 'that', 'this', 'into', 'for', 'you', 'your', 'have', 'just', 'also',
       'find', 'check', 'open', 'go', 'to', 'on', 'in', 'of', 'a', 'an', 'is', 'are',
-      'и', 'затем', 'потом', 'это', 'как', 'что', 'чтобы', 'для', 'или', 'надо', 'нужно', 'сделай', 'сделать',
-      'найди', 'проверь', 'открой', 'перейди', 'в', 'на', 'по', 'из', 'к', 'и', 'а', 'но',
+      'it', 'how', 'what', 'why', 'for', 'or', 'need', 'please', 'do', 'make',
+      'open', 'check', 'find', 'go', 'to', 'from', 'by', 'and', 'but',
     ]);
 
     const tokens = String(text || '')

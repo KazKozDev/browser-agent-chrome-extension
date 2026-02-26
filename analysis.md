@@ -1,38 +1,38 @@
-# Анализ архитектуры: код vs исследование
+# Architecture Analysis: Code vs Research
 
-## Приоритетный roadmap (по impact)
+## Priority Roadmap (by impact)
 
-1. [x] Network-level domain filtering (DNR dynamic rules, блок всех request types)
-2. [x] Multi-action batching (reflection: `actions[]` вместо `next_action`)
+1. [x] Network-level domain filtering (DNR dynamic rules, blocks all request types)
+2. [x] Multi-action batching (reflection: `actions[]` instead of `next_action`)
 3. [x] Structured sub-goals (`SubGoal[]`: status/confidence/evidence/attempts)
 4. [x] LLM-based history summarization (Tier 2, incremental anchored summary)
-5. [x] Rollback/state snapshots перед irreversible actions
+5. [x] Rollback/state snapshots before irreversible actions
 
-## Что сделано в этом коммите
+## What Was Implemented in This Commit
 
-- Добавлена сетeвая блокировка доменов на уровне `chrome.declarativeNetRequest` в background service worker.
-- DNR-правила переведены на domain-aware matching (`requestDomains`) с fallback на `urlFilter` для совместимости.
-- Синхронизация DNR-правил при старте расширения, обновлении blocklist и изменении `chrome.storage.local`.
-- Добавлен security preflight: task/recovery/scheduled run не стартуют, если network block rules не удалось синхронизировать.
-- Добавлена дополнительная синхронизация на `chrome.runtime.onInstalled` и `chrome.runtime.onStartup`.
-- Нормализация доменов blocklist (убираются схемы/`www`/path/`user@host` шум).
-- Усилена валидация URL навигации: запрещены `user:pass@host` URL.
-- Добавлены unit-тесты для URL/blocklist security кейсов.
-- Реализован multi-action batching: reflection теперь поддерживает `actions[]` (до 4 действий/шаг), run-loop исполняет batch в одном step с сохранением early-break на navigation.
-- Реализован structured sub-goal tracking: `SubGoal[]` с полями `status/confidence/evidence/attempts`, авто-инициализация из goal, обновление по каждому action, интеграция в task-state message и checkpoint/resume.
-- Реализован Tier-2 context compression: evicted history turns собираются в pending chunks, инкрементально сжимаются через LLM в running summary и подмешиваются в `[TASK STATE TRACKER]`; summary сохраняется в checkpoint/resume.
-- Реализован Tier-3 retrieval memory (embedding-like RAG): evicted chunks индексируются в `ragEntries`, затем top-k релевантных архивных фрагментов подмешиваются в `[TASK STATE TRACKER]` как `Relevant archived memory (semantic retrieval)`.
-- Реализован rollback/state snapshot manager: авто-capture snapshot перед risk actions (`click(confirm)`, submit via Enter, risky `javascript`), tool `restore_snapshot` для отката URL/cookies/scroll, и сохранение snapshot state в checkpoint/resume.
+- Added network-level domain blocking via `chrome.declarativeNetRequest` in the background service worker.
+- Migrated DNR rules to domain-aware matching (`requestDomains`) with `urlFilter` fallback for compatibility.
+- Added DNR rule sync on extension startup, blocklist updates, and `chrome.storage.local` changes.
+- Added security preflight: task/recovery/scheduled run will not start if network block rules fail to sync.
+- Added extra sync on `chrome.runtime.onInstalled` and `chrome.runtime.onStartup`.
+- Added blocklist domain normalization (removes scheme/`www`/path/`user@host` noise).
+- Strengthened URL navigation validation: `user:pass@host` URLs are blocked.
+- Added unit tests for URL/blocklist security cases.
+- Implemented multi-action batching: reflection now supports `actions[]` (up to 4 actions per step), and the run loop executes a batch in a single step while preserving early-break on navigation.
+- Implemented structured sub-goal tracking: `SubGoal[]` with `status/confidence/evidence/attempts`, auto-init from goal, update on each action, and integration into task-state message plus checkpoint/resume.
+- Implemented Tier-2 context compression: evicted history turns are collected as pending chunks, incrementally compressed via LLM into a running summary, and mixed into `[TASK STATE TRACKER]`; summary is persisted in checkpoint/resume.
+- Implemented Tier-3 retrieval memory (embedding-like RAG): evicted chunks are indexed in `ragEntries`, then top-k relevant archived fragments are mixed into `[TASK STATE TRACKER]` as `Relevant archived memory (semantic retrieval)`.
+- Implemented rollback/state snapshot manager: auto-captures snapshots before risky actions (`click(confirm)`, submit via Enter, risky `javascript`), adds `restore_snapshot` tool for URL/cookies/scroll rollback, and persists snapshot state in checkpoint/resume.
 
-## Следующий слой (после топ-5)
+## Next Layer (After Top-5)
 
-- Реализован composite confidence в reflection: `effective = 0.6 * corrected_llm_confidence * stagnation_penalty * loop_penalty + 0.4 * progress_ratio`.
-- Добавлена overconfidence-коррекция (`* 0.85`) и stagnation decay (`0.9 ** noProgressStreak`) в калибровку confidence.
-- Добавлены resource budgets в run-loop: wall-clock, total tokens, estimated USD cost с early-stop.
-- Добавлен structured terminal output: `status` + `partial_result` (`complete|partial|failed|timeout|stuck`, `remaining_subgoals`, `suggestion`).
-- Adaptive perception: добавлен sparse-AX детектор (low interactive density) с авто-fallback на vision для interaction-oriented шагов.
-- Adaptive perception: `_waitForNavigation()` теперь дожидается DOM settle через `MutationObserver` (`waitForDomSettle`) вместо фиксированного `500ms` хардкода.
-- Adaptive perception: `read_page` стал task-aware (более компактный viewport-oriented профиль для form-like целей, более широкий профиль для extraction-like задач).
-- Adaptive perception: в vision prompt добавлен structured SoM payload (`id/label/x/y/w/h` JSON), не только legend-строка.
-- Добавлен pre-send token estimation: перед `provider.chat` выполняется прогноз input/output токенов и preflight budget-check; reflection-call блокируется заранее при overflow, history summarization переходит в skip-mode без LLM вызова.
-- Добавлен human-in-the-loop escalation для medium confidence: при `confidence ~0.5-0.85` под стагнацией/дефицитом step-budget агент ставит `paused_waiting_user` с `guidance_needed`, ждёт Resume и продолжает с user-reviewed контекстом.
+- Implemented composite confidence in reflection: `effective = 0.6 * corrected_llm_confidence * stagnation_penalty * loop_penalty + 0.4 * progress_ratio`.
+- Added overconfidence correction (`* 0.85`) and stagnation decay (`0.9 ** noProgressStreak`) to confidence calibration.
+- Added resource budgets in the run loop: wall-clock, total tokens, and estimated USD cost with early stop.
+- Added structured terminal output: `status` + `partial_result` (`complete|partial|failed|timeout|stuck`, `remaining_subgoals`, `suggestion`).
+- Adaptive perception: added sparse-AX detector (low interactive density) with automatic fallback to vision for interaction-oriented steps.
+- Adaptive perception: `_waitForNavigation()` now waits for DOM settle via `MutationObserver` (`waitForDomSettle`) instead of fixed `500ms` hardcode.
+- Adaptive perception: `read_page` is now task-aware (more compact viewport-oriented profile for form-like goals, wider profile for extraction-like goals).
+- Adaptive perception: added structured SoM payload (`id/label/x/y/w/h` JSON) to the vision prompt, not only legend text.
+- Added pre-send token estimation: before `provider.chat`, input/output tokens are estimated and preflight budget-check is applied; reflection call is blocked early on overflow, and history summarization switches to skip-mode without LLM call.
+- Added human-in-the-loop escalation for medium confidence: when `confidence ~0.5-0.85` under stagnation/step-budget pressure, the agent switches to `paused_waiting_user` with `guidance_needed`, waits for Resume, and continues with user-reviewed context.

@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Browser Agent</title>
+  <title>BrowseAgent</title>
   <link rel="stylesheet" href="icons.css">
   <style>
     @font-face {
@@ -1970,7 +1970,7 @@
     }
 
     .capabilities-wrap {
-      padding: 10px 14px 18px;
+      padding: 18px 14px 18px;
       overflow-y: auto;
       flex: 1;
     }
@@ -1979,7 +1979,7 @@
       color: var(--text2);
       font-size: 13px;
       line-height: 1.5;
-      margin: 4px 0 10px;
+      margin: 0 0 10px;
     }
 
     .capabilities-wrap .help-card summary {
@@ -1997,6 +1997,7 @@
     .capabilities-wrap .help-card h3 {
       font-size: 12px;
       letter-spacing: 2.1px;
+      line-height: 1;
     }
 
     .capabilities-wrap .help-item {
@@ -2203,7 +2204,7 @@
     }
 
     .connections-wrap {
-      padding: 12px 14px 16px;
+      padding: 18px 14px 16px;
       overflow-y: auto;
       flex: 1;
     }
@@ -2534,6 +2535,10 @@
       padding: 4px 0;
     }
 
+    .conn-route-row.disabled {
+      opacity: 0.62;
+    }
+
     .conn-route-label {
       flex: 1;
       font-size: 12px;
@@ -2558,6 +2563,15 @@
       height: 18px;
     }
 
+    .conn-route-switch input:disabled + .toggle-slider {
+      cursor: not-allowed;
+      background: #3a3328;
+    }
+
+    .conn-route-switch input:disabled + .toggle-slider::before {
+      background: rgba(223, 206, 179, 0.48);
+    }
+
     .conn-route-switch .toggle-slider::before {
       width: 12px;
       height: 12px;
@@ -2577,7 +2591,7 @@
   <div class="header">
     <h1>
       <span class="dot" id="statusDot"></span>
-      Browser Agent
+      BrowseAgent
       <span class="app-version" id="appVersion">v1.0.2</span>
     </h1>
     <div class="header-actions">
@@ -2623,7 +2637,7 @@
         </div>
         <button class="send-btn" id="sendBtn" title="Run"><span class="i i-play"></span></button>
       </div>
-      <div class="task-footer-note">Browser Agent can make mistakes. Please double-check responses.</div>
+      <div class="task-footer-note">BrowseAgent can make mistakes. Please double-check responses.</div>
     </div>
   </div>
 
@@ -2723,8 +2737,8 @@
           <h3><span class="i i-shield"></span> Safety & Permissions</h3>
         </summary>
         <div class="card-body">
-          <div class="help-item"><b>Script sandboxing</b> <span class="hi-desc">JS is filtered: no cookies, auth headers, or storage access</span></div>
-          <div class="help-item"><b>Per-domain JS permission</b> <span class="hi-desc">Agent asks before running scripts on new sites</span></div>
+          <div class="help-item"><b>Action loop guard</b> <span class="hi-desc">Blocks repeated low-signal actions and asks to change strategy</span></div>
+          <div class="help-item"><b>Budget guard</b> <span class="hi-desc">Pauses before token exhaustion so runs can finish with usable output</span></div>
           <div class="help-item"><b>Site blocklist</b> <span class="hi-desc">Block navigation to sensitive domains (banks, crypto)</span></div>
         </div>
       </details>

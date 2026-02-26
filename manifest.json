@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Browser Agent",
+  "name": "BrowseAgent",
   "version": "1.0.2",
   "description": "Tell your browser what to do — it does the rest. Public Beta.",
   "permissions": [
@@ -55,7 +55,7 @@
       "48": "icons/icon48.png",
       "128": "icons/icon128.png"
     },
-    "default_title": "Browser Agent v1.0.2 (Beta)"
+    "default_title": "BrowseAgent v1.0.2 (Beta)"
   },
   "icons": {
     "16": "icons/icon16.png",

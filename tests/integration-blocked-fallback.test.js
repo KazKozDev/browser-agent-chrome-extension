@@ -118,3 +118,89 @@ test('sanitizePlannedAction avoids repeating identical find_text query on SERP',
     assert.notEqual(next.tool, 'find_text');
   }
 });
+
+test('repeated scroll with same args is allowed while page keeps moving', async () => {
+  const agent = makeAgent();
+  const messages = [];
+  let y = 0;
+  agent._executeTool = async (name) => {
+    if (name !== 'scroll') return { success: true };
+    const before = y;
+    y += 4000;
+    return {
+      success: true,
+      description: 'Scrolled down 4000px',
+      beforeY: before,
+      afterY: y,
+      deltaY: y - before,
+      moved: true,
+      atBottom: false,
+    };
+  };
+
+  await agent._handleToolCalls(
+    0,
+    messages,
+    {
+      text: null,
+      toolCalls: [{ id: 't1', name: 'scroll', arguments: { direction: 'down', amount: 4000 } }],
+    },
+    { remaining: 6 },
+  );
+  await agent._handleToolCalls(
+    1,
+    messages,
+    {
+      text: null,
+      toolCalls: [{ id: 't2', name: 'scroll', arguments: { direction: 'down', amount: 4000 } }],
+    },
+    { remaining: 5 },
+  );
+
+  const last = agent.history[agent.history.length - 1];
+  assert.equal(last.tool, 'scroll');
+  assert.equal(last.result.success, true);
+  assert.notEqual(last.result.code, 'DUPLICATE_CALL');
+});
+
+test('repeated scroll with no movement is blocked as duplicate', async () => {
+  const agent = makeAgent();
+  const messages = [];
+  agent._executeTool = async (name) => {
+    if (name !== 'scroll') return { success: true };
+    return {
+      success: true,
+      description: 'Scrolled down 4000px',
+      beforeY: 12000,
+      afterY: 12000,
+      deltaY: 0,
+      moved: false,
+      atBottom: true,
+    };
+  };
+
+  await agent._handleToolCalls(
+    0,
+    messages,
+    {
+      text: null,
+      toolCalls: [{ id: 't1', name: 'scroll', arguments: { direction: 'down', amount: 4000 } }],
+    },
+    { remaining: 6 },
+  );
+  await agent._handleToolCalls(
+    1,
+    messages,
+    {
+      text: null,
+      toolCalls: [{ id: 't2', name: 'scroll', arguments: { direction: 'down', amount: 4000 } }],
+    },
+    { remaining: 5 },
+  );
+
+  const last = agent.history[agent.history.length - 1];
+  assert.equal(last.tool, 'scroll');
+  assert.equal(last.result.success, false);
+  assert.equal(last.result.code, 'DUPLICATE_CALL');
+  assert.equal(last.result.hint?.nextTool, 'press_key');
+});

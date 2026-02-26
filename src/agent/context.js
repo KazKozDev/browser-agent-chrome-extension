@@ -647,7 +647,7 @@ export const contextMethods = {
         this._buildMessagesForLLM([
           {
             role: 'system',
-            content: 'You compress browser-agent history. Return strict JSON: {"summary": "..."} only. Keep concrete facts, blockers, URLs, decisions, and unresolved unknowns. Max 1200 chars.',
+            content: 'You compress browseagent history. Return strict JSON: {"summary": "..."} only. Keep concrete facts, blockers, URLs, decisions, and unresolved unknowns. Max 1200 chars.',
           },
           {
             role: 'user',
@@ -671,7 +671,7 @@ export const contextMethods = {
           this._buildMessagesForLLM([
             {
               role: 'system',
-              content: 'You compress browser-agent history. Return strict JSON: {"summary": "..."} only. Keep concrete facts, blockers, URLs, decisions, and unresolved unknowns. Max 1200 chars.',
+              content: 'You compress browseagent history. Return strict JSON: {"summary": "..."} only. Keep concrete facts, blockers, URLs, decisions, and unresolved unknowns. Max 1200 chars.',
             },
             {
               role: 'user',

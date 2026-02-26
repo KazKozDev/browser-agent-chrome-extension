@@ -387,7 +387,6 @@ function validateNextActionArgs(tool, args) {
     navigate: ['url'],
     open_tab: ['url'],
     http_request: ['url'],
-    javascript: ['code'],
     click: ['target'],
     hover: ['target'],
     type: ['target', 'text'],
@@ -429,13 +428,6 @@ export const reflectionMethods = {
 
     let q = goal
       .replace(/^task:\s*/i, '')
-      .replace(/^(как\s+пишется|как\s+правильно\s+пишется|найди|проверь|узнай)\s+/i, '')
-      .replace(/\s+на\s+сайте\s+.+$/i, '')
-      .replace(/\s+на\s+gramota\.ru.*$/i, '')
-      .replace(/\s+на\s+gramota\s*\.?\s*ru.*$/i, '')
-      .replace(/\s+на\s+грамот[аеы]?\s*\.?\s*ру.*$/i, '')
-      .replace(/\s+и\s+отправь.*$/i, '')
-      .replace(/\s+отправь.*$/i, '')
       .trim();
 
     q = q.replace(/^["'«“„]+|["'»”‟]+$/g, '').trim();
@@ -557,7 +549,7 @@ export const reflectionMethods = {
       'Do not repeat the same tool with the same args unless page state changed.',
       'If current page is a search-results page and repeated reads did not add evidence, the next action must LEAVE the SERP (open/click/navigate to a result).',
       'If one query failed repeatedly, reformulate the query or switch source instead of repeating it.',
-      'Set search_query to a concise query string when the task involves search/find/spelling lookup.',
+      'Set search_query to a concise query string when the task involves search/find lookup.',
       'For backward compatibility, also mirror the first action in next_action when sufficiency=false; otherwise next_action=null.',
       'Each actions[i].args must include all required parameters for the chosen tool (for example: find.query, type.target+text, navigate.url).',
       'Do not output anything except the JSON object.',
@@ -571,24 +563,11 @@ export const reflectionMethods = {
 
     const budget = normalizeStepBudget(stepBudget);
     const allowed = new Set((allowedTools || []).map((t) => t.name));
-    const goalText = String(this?._goal || '').toLowerCase();
-    const isSpellingGoal = /(как\s+пишется|как\s+правильно|spelling)/i.test(goalText);
     const searchQuery = normalizeSearchQuery(raw.search_query || this?._reflectionState?.search_query);
 
-    const synthesizeNextAction = (factsList = [], unknownList = []) => {
-      const factsText = factsList.join(' ').toLowerCase();
-      const unknownText = unknownList.join(' ').toLowerCase();
+    const synthesizeNextAction = () => {
       const goalQuery = searchQuery || this._deriveGoalQuery();
 
-      if (isSpellingGoal && allowed.has('find_text')) {
-        return { tool: 'find_text', args: { query: goalQuery || 'Правильно' } };
-      }
-      if (
-        /product|products|товар|цена|price|rating|under\s*\$|cheap|cheapest|headphone|науш/i.test(`${goalText} ${factsText} ${unknownText}`) &&
-        allowed.has('extract_structured')
-      ) {
-        return { tool: 'extract_structured', args: { hint: 'search results', maxItems: 20 } };
-      }
       if (allowed.has('get_page_text')) {
         return {
           tool: 'get_page_text',
@@ -921,7 +900,6 @@ export const reflectionMethods = {
 
   _buildFallbackReflectionState(activeTools = [], reason = '') {
     const hasTool = (name) => activeTools.some((t) => t.name === name);
-    const goalText = String(this?._goal || '').toLowerCase();
     const goalQuery = normalizeSearchQuery(this?._reflectionState?.search_query) || this._deriveGoalQuery();
 
     let chosen = 'get_page_text';
@@ -933,9 +911,6 @@ export const reflectionMethods = {
     ) {
       chosen = 'screenshot';
       args = {};
-    } else if (/(как\s+пишется|как\s+правильно|spelling)/i.test(goalText) && hasTool('find_text')) {
-      chosen = 'find_text';
-      args = { query: goalQuery || 'Правильно' };
     } else if (hasTool('get_page_text')) {
       chosen = 'get_page_text';
       args = { scope: 'viewport' };

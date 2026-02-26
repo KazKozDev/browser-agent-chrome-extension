@@ -16,23 +16,23 @@ function makeAgent() {
   agent.metrics = {
     normalization: { total: 0, changed: 0 },
   };
-  agent._deriveCurrentSearchNeedle = () => 'резервный запрос';
+  agent._deriveCurrentSearchNeedle = () => 'fallback query';
   return agent;
 }
 
 test('normalization keeps unicode letters and digits', () => {
   const agent = makeAgent();
-  const input = '  こんにちは 世界 ١٢٣ Привет  ';
+  const input = '  こんにちは 世界 ١٢٣ Hello  ';
   const out = agent._sanitizeFindTextQuery(input, {
     allowFallbackWhenEmpty: true,
     source: 'test.unicode',
   });
-  assert.equal(out, 'こんにちは 世界 ١٢٣ Привет');
+  assert.equal(out, 'こんにちは 世界 ١٢٣ Hello');
 });
 
 test('non-empty query is not replaced by fallback value', () => {
   const agent = makeAgent();
-  const input = 'как пишется слово ёжик на сайте gramota.ru';
+  const input = 'how to spell the word hedgehog on gramota.ru';
   const out = agent._sanitizeFindTextQuery(input, {
     allowFallbackWhenEmpty: true,
     source: 'test.non_empty',
@@ -53,7 +53,7 @@ test('empty query may use fallback and control chars are removed', () => {
     allowFallbackWhenEmpty: true,
     source: 'test.empty',
   });
-  assert.equal(empty, 'резервный запрос');
+  assert.equal(empty, 'fallback query');
 });
 
 test('normalization metrics are tracked', () => {

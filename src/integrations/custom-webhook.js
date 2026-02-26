@@ -11,7 +11,7 @@ export async function send(conn, payload, testMode = false) {
   } catch {
     throw new Error('Webhook headers must be valid JSON');
   }
-  const body = testMode ? { test: true, source: 'browser-agent' } : { source: 'browser-agent', event: 'task_result', payload };
+  const body = testMode ? { test: true, source: 'browseagent' } : { source: 'browseagent', event: 'task_result', payload };
   await safeFetchJson(url, {
     method,
     headers: { 'Content-Type': 'application/json', ...headers },

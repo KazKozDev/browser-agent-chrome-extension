@@ -806,7 +806,7 @@
 
     const lcHint = String(hint || '').toLowerCase();
     const selectors = [];
-    if (lcHint.includes('product') || lcHint.includes('товар')) {
+    if (lcHint.includes('product') || lcHint.includes('item')) {
       selectors.push(
         '[data-testid*="product"]',
         '[class*="product-card"]',
@@ -837,7 +837,7 @@
     const hint = String(payload?.hint || '').trim();
     const selector = String(payload?.selector || '').trim();
     const maxItems = Math.min(Math.max(Number(payload?.maxItems) || 30, 1), 100);
-    const wantsProducts = /product|products|товар|товары|headphone|headphones|науш/i.test(`${hint} ${selector}`);
+    const wantsProducts = /product|products|item|items|headphone|headphones/i.test(`${hint} ${selector}`);
 
     const rawRoots = candidateRoots(activeDoc, hint, selector);
     const roots = uniqueRoots(rawRoots).filter((el) => {
@@ -1207,9 +1207,6 @@
                 strategy: 'change_interaction_method',
                 nextTool: 'press_key',
                 args: { key: 'Enter' },
-                alternatives: [
-                  { tool: 'javascript', args: { code: '// set input value and submit form safely' } },
-                ],
                 avoidRepeat: true,
               },
             },
@@ -1329,11 +1326,35 @@
       }
 
       case 'scroll': {
-        const amount = params?.amount || 500;
-        const dir = target === 'up' ? -amount : amount;
-        const view = getActiveDocument().defaultView || window;
-        view.scrollBy({ top: dir, behavior: 'smooth' });
-        return { success: true, description: `Scrolled ${target} ${amount}px` };
+        const activeDoc = getActiveDocument();
+        const view = activeDoc.defaultView || window;
+        const root = activeDoc.scrollingElement || activeDoc.documentElement || activeDoc.body;
+        const beforeY = Math.max(Number(view.scrollY || root?.scrollTop || 0), 0);
+        const maxY = Math.max(
+          Number(root?.scrollHeight || 0) - Number(view.innerHeight || activeDoc.documentElement?.clientHeight || 0),
+          0
+        );
+        const rawAmount = Number(params?.amount);
+        const amount = Number.isFinite(rawAmount)
+          ? Math.min(Math.max(Math.round(Math.abs(rawAmount)), 40), 12000)
+          : 500;
+        const direction = String(target || 'down').toLowerCase() === 'up' ? -1 : 1;
+        view.scrollBy({ top: direction * amount, behavior: 'auto' });
+        const afterY = Math.max(Number(view.scrollY || root?.scrollTop || 0), 0);
+        const moved = Math.abs(afterY - beforeY) >= 1;
+        const atTop = afterY <= 1;
+        const atBottom = afterY >= Math.max(maxY - 1, 0);
+        return {
+          success: true,
+          description: `Scrolled ${direction < 0 ? 'up' : 'down'} ${amount}px`,
+          beforeY,
+          afterY,
+          deltaY: afterY - beforeY,
+          moved,
+          atTop,
+          atBottom,
+          maxY,
+        };
       }
 
       case 'hover': {
@@ -1420,6 +1441,41 @@
         });
         dispatchEl.dispatchEvent(keyupEvent);
 
+        const hasModifier = !!(flags?.ctrlKey || flags?.metaKey || flags?.altKey || flags?.shiftKey);
+        const navKey = String(params.key || '').trim();
+        if (!hasModifier && ['End', 'Home', 'PageDown', 'PageUp'].includes(navKey)) {
+          const view = activeDoc.defaultView || window;
+          const root = activeDoc.scrollingElement || activeDoc.documentElement || activeDoc.body;
+          const beforeY = Math.max(Number(view.scrollY || root?.scrollTop || 0), 0);
+          const pageStep = Math.max(Math.round((Number(view.innerHeight) || 900) * 0.9), 320);
+          if (navKey === 'End') {
+            view.scrollTo({ top: Number(root?.scrollHeight || beforeY), behavior: 'auto' });
+          } else if (navKey === 'Home') {
+            view.scrollTo({ top: 0, behavior: 'auto' });
+          } else if (navKey === 'PageDown') {
+            view.scrollBy({ top: pageStep, behavior: 'auto' });
+          } else if (navKey === 'PageUp') {
+            view.scrollBy({ top: -pageStep, behavior: 'auto' });
+          }
+          const afterY = Math.max(Number(view.scrollY || root?.scrollTop || 0), 0);
+          const maxY = Math.max(
+            Number(root?.scrollHeight || 0) - Number(view.innerHeight || activeDoc.documentElement?.clientHeight || 0),
+            0
+          );
+          const moved = Math.abs(afterY - beforeY) >= 1;
+          return {
+            success: true,
+            description: `Pressed ${navKey}`,
+            beforeY,
+            afterY,
+            deltaY: afterY - beforeY,
+            moved,
+            atTop: afterY <= 1,
+            atBottom: afterY >= Math.max(maxY - 1, 0),
+            maxY,
+          };
+        }
+
         // For Enter: also try form.submit() if the active element is inside a form
         // This handles React/modern apps that don't respond to synthetic key events
         if ((params.key === 'Enter' || params.key === 'Return') && dispatchEl !== activeDoc.body) {
@@ -1448,22 +1504,6 @@
             avoidRepeat: true,
           },
         });
-    }
-  }
-
-  // ===== JAVASCRIPT EXECUTION =====
-
-  // Use Function() instead of eval() to avoid local closure access
-  function executeJavaScript(code) {
-    try {
-      const fn = new Function(code);
-      const result = fn();
-      return {
-        success: true,
-        result: result !== undefined ? String(result).slice(0, 5000) : 'undefined',
-      };
-    } catch (err) {
-      return makeError(ACTION_ERROR.JS_EXEC_FAILED, err.message);
     }
   }
 
@@ -2046,9 +2086,6 @@
           waitForDomSettle(payload).then((result) => {
             sendResponse(result);
           });
-          break;
-        case 'executeJS':
-          sendResponse(executeJavaScript(payload?.code || ''));
           break;
         case 'readConsole':
           sendResponse(getConsoleMessages(payload?.since || 0));

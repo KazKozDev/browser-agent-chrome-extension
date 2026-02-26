@@ -72,15 +72,6 @@ const FORBIDDEN_REQUEST_HEADERS = new Set([
   'proxy-authorization', 'proxy-connection',
 ]);
 
-// Patterns blocked in javascript tool for security
-const BLOCKED_JS_PATTERNS = [
-  { re: /document\.cookie/i, msg: 'Access to document.cookie is blocked for security' },
-  { re: /localStorage\s*[.[]/i, msg: 'Access to localStorage is blocked for security' },
-  { re: /sessionStorage\s*[.[]/i, msg: 'Access to sessionStorage is blocked for security' },
-  { re: /indexedDB/i, msg: 'Access to indexedDB is blocked for security' },
-  { re: /\.setRequestHeader\s*\(\s*['"]Authorization/i, msg: 'Setting auth headers is blocked' },
-];
-
 const AUTH_URL_HINT_RE = /(?:^|[/?#._-])(login|log-in|signin|sign-in|auth|authorize|oauth|challenge|verify|captcha)(?:[/?#._-]|$)/i;
 const CAPTCHA_HINTS = [
   'captcha',
@@ -90,18 +81,16 @@ const CAPTCHA_HINTS = [
   'i am not a robot',
   'verify you are human',
   'prove you are human',
-  'подтвердите, что вы не робот',
-  'подтвердите что вы не робот',
-  'я не робот',
+  'confirm you are not a robot',
+  'i am human',
 ];
 const LOGIN_HINTS = [
   'sign in',
   'signin',
   'log in',
   'login',
-  'вход',
-  'войти',
-  'авторизац',
+  'authentication',
+  'authorize',
   'authenticate',
   'verification code',
   'two-factor',
@@ -109,10 +98,9 @@ const LOGIN_HINTS = [
 ];
 const PASSWORD_HINTS = [
   'password',
-  'пароль',
   'passcode',
   'one-time code',
-  'одноразовый код',
+  'one-time password',
   'otp',
   'sms code',
 ];
@@ -199,8 +187,6 @@ function debugWarn(context, err) {
 const BLOCKED_ACTION_CODES = new Set([
   'SITE_BLOCKED',
   'HTTP_REQUEST_BLOCKED',
-  'JS_BLOCKED',
-  'JS_DOMAIN_BLOCKED',
   'CONFIRMATION_REQUIRED',
   'INVALID_TARGET',
   'ELEMENT_NOT_FOUND',
@@ -244,10 +230,6 @@ export class Agent {
     this.planMode = false;
     this.onPlan = null;
     this._planApprovalResolver = null;
-    // Per-domain JS permission
-    this.trustedJsDomains = new Set();
-    this._jsDomainResolver = null;
-    this._jsDomainDenied = false;
     this.onNotifyConnector = null;
     // Site blocklist (custom domains loaded from storage)
     this.blockedDomains = new Set(DEFAULT_BLOCKED_DOMAINS.map(normalizeBlockedDomain).filter(Boolean));
@@ -280,7 +262,6 @@ export class Agent {
     this._humanGuidanceEscalationCount = 0;
     this._manualPartialRequested = false;
     this._activePauseKind = '';
-    this._pendingJsDomain = '';
     this._resourceBudgets = {
       maxWallClockMs: AGENT_MAX_WALL_CLOCK_MS,
       maxTotalTokens: AGENT_MAX_TOTAL_TOKENS,
@@ -422,7 +403,6 @@ export class Agent {
     this._manualPartialRequested = false;
     this._pendingResumeGuidance = '';
     this._activePauseKind = '';
-    this._pendingJsDomain = '';
     this._budgetLimitsBypassed = false;
 
     if (hasResumeState) {
@@ -494,16 +474,13 @@ export class Agent {
 
     // Load persisted security settings
     try {
-      const stored = await chrome.storage.local.get(['customBlockedDomains', 'trustedJsDomains']);
+      const stored = await chrome.storage.local.get(['customBlockedDomains']);
       if (Array.isArray(stored.customBlockedDomains)) {
         for (const d of stored.customBlockedDomains) {
           const domain = normalizeBlockedDomain(d);
           if (!domain) continue;
           this.blockedDomains.add(domain);
         }
-      }
-      if (Array.isArray(stored.trustedJsDomains)) {
-        for (const d of stored.trustedJsDomains) this.trustedJsDomains.add(d);
       }
     } catch (err) {
       debugWarn('run.loadSecuritySettings', err);
@@ -570,11 +547,9 @@ export class Agent {
 
     // Build task-aware initial message
     const goalText = String(goal || '').trim();
-    const startsAsNavigate = /^(open|go to|navigate|перейди|открой|зайди|покажи)\s/i.test(goalText);
-    // \b does not work with Cyrillic in JS — use space/start/end boundaries for Russian words
+    const startsAsNavigate = /^(open|go to|navigate|visit|show)\s/i.test(goalText);
     const hasExtraIntentEn = /\b(and|then|after|also|find|search|check|extract|fill)\b/i.test(goalText);
-    const hasExtraIntentRu = /(^|\s)(и|затем|потом|также|найди|проверь|извлеки|заполни)(\s|$)/i.test(goalText);
-    const hasExtraIntent = hasExtraIntentEn || hasExtraIntentRu || /[,;]/.test(goalText);
+    const hasExtraIntent = hasExtraIntentEn || /[,;]/.test(goalText);
     const isNavigateOnly = startsAsNavigate && !hasExtraIntent;
     this._isNavigateOnly = isNavigateOnly;
     let taskMessage = `Task: ${goal}`;
@@ -967,7 +942,7 @@ export class Agent {
             };
             if (
               candidate.tool === 'http_request' &&
-              /на\s+сайте|website|on\s+site/i.test(String(this._goal || ''))
+              /website|on\s+site/i.test(String(this._goal || ''))
             ) {
               this._appendMessage(messages, {
                 role: 'user',
@@ -1196,17 +1171,29 @@ export class Agent {
       if (tc.name !== 'done' && tc.name !== 'fail') {
         const toolKey = tc.name + ':' + JSON.stringify(normalizedArgs);
         if (toolKey === this._lastToolKey) {
-          this._dupCount += 1;
-          this.metrics.duplicateToolCalls += 1;
-          if (this._dupCount >= 1) {
-            isDuplicate = true;
-            duplicateNudge = `You already called ${tc.name} with the same arguments ${this._dupCount + 1} times. The result will not change. Try a DIFFERENT tool or approach. For example: use find_text to search for specific content, get_page_text to read the full page, or navigate to a different URL.`;
-            duplicateHint = {
-              strategy: 'change_tool_or_args',
-              nextTool: 'read_page',
-              args: {},
-              avoidRepeat: true,
-            };
+          const allowRepeat = this._shouldAllowImmediateRepeat(tc.name, normalizedArgs);
+          if (!allowRepeat) {
+            this._dupCount += 1;
+            this.metrics.duplicateToolCalls += 1;
+            if (this._dupCount >= 1) {
+              isDuplicate = true;
+              duplicateNudge = `You already called ${tc.name} with the same arguments ${this._dupCount + 1} times. The result will not change. Try a DIFFERENT tool or approach. For example: use find_text to search for specific content, get_page_text to read the full page, or navigate to a different URL.`;
+              duplicateHint = tc.name === 'scroll'
+                ? {
+                  strategy: 'change_scroll_strategy',
+                  nextTool: 'press_key',
+                  args: { key: 'End' },
+                  avoidRepeat: true,
+                }
+                : {
+                  strategy: 'change_tool_or_args',
+                  nextTool: 'read_page',
+                  args: {},
+                  avoidRepeat: true,
+                };
+            }
+          } else {
+            this._dupCount = 0;
           }
         } else {
           this._lastToolKey = toolKey;
@@ -1296,34 +1283,6 @@ export class Agent {
         }
       }
 
-      // JS safety check
-      let isJsBlocked = false;
-      let jsBlockReason = '';
-      if (tc.name === 'javascript' && !isDuplicate) {
-        const blocked = this._checkJsSafety(normalizedArgs.code);
-        if (blocked) {
-          isJsBlocked = true;
-          jsBlockReason = blocked;
-        } else {
-          // Per-domain JS permission check
-          try {
-            const tab = await chrome.tabs.get(this.tabId);
-            if (tab?.url && !tab.url.startsWith('chrome://')) {
-              const domain = new URL(tab.url).hostname;
-              if (!this.trustedJsDomains.has(domain)) {
-                const allowed = await this._waitForJsDomainApproval(domain);
-                if (!allowed || this._aborted) {
-                  isJsBlocked = true;
-                  jsBlockReason = `JavaScript execution on "${domain}" was not permitted.`;
-                }
-              }
-            }
-          } catch (err) {
-            debugWarn('tool.javascript.readTabForDomainCheck', err);
-          }
-        }
-      }
-
       let result;
       let preActionSnapshot = null;
       if (isDuplicate) {
@@ -1336,9 +1295,6 @@ export class Agent {
           },
           retryable: false,
         });
-      } else if (isJsBlocked) {
-        const errType = jsBlockReason.includes('permitted') ? 'JS_DOMAIN_BLOCKED' : 'JS_BLOCKED';
-        result = this._makeError(errType, jsBlockReason);
       } else {
         const snapshotReason = this._isRiskyActionForSnapshot(tc.name, normalizedArgs);
         if (snapshotReason) {
@@ -1651,7 +1607,7 @@ export class Agent {
           .join('; ');
         this._appendMessage(messages, {
           role: 'user',
-          content: `[SYSTEM] ${this._toolFailStreak} consecutive tool failures: ${failedTools}. STOP and RETHINK. Your current approach is not working. You MUST try a fundamentally different strategy: navigate to a direct URL (e.g. google.com/search?q=your+query), use javascript to interact with the page, or try a completely different website. Do NOT repeat similar failing actions.`,
+          content: `[SYSTEM] ${this._toolFailStreak} consecutive tool failures: ${failedTools}. STOP and RETHINK. Your current approach is not working. You MUST try a fundamentally different strategy: navigate to a direct URL (e.g. google.com/search?q=your+query), refresh targets with read_page/find, or try a completely different website. Do NOT repeat similar failing actions.`,
         });
         this._toolFailStreak = 0; // Reset so we don't spam
       }
@@ -1675,8 +1631,8 @@ export class Agent {
       case 'read_page':
         {
           const goalText = String(this._goal || '').toLowerCase();
-          const formLikeGoal = /(fill|form|login|sign\s?in|signup|register|input|enter|type|заполн|форма|логин|регистрац)/i.test(goalText);
-          const extractionLikeGoal = /(extract|read|collect|news|result|table|list|price|product|find|найд|прочитай|извлек|список|цена|товар)/i.test(goalText);
+          const formLikeGoal = /(fill|form|login|sign\s?in|signup|register|input|enter|type)/i.test(goalText);
+          const extractionLikeGoal = /(extract|read|collect|news|result|table|list|price|product|find|search|item)/i.test(goalText);
           const defaultMaxDepth = formLikeGoal ? 9 : 12;
           const defaultMaxNodes = formLikeGoal ? 130 : (extractionLikeGoal ? 210 : 180);
           const result = await this._sendToContent('readPage', {
@@ -1996,9 +1952,6 @@ export class Agent {
           params: { key: args.key, modifiers: args.modifiers },
         });
 
-      case 'javascript':
-        return await this._executeJavaScriptMainWorld(args.code);
-
       case 'wait_for':
         return await this._waitForCondition(args);
 
@@ -2272,32 +2225,29 @@ export class Agent {
     ctx.restore();
   }
 
-  async _executeJavaScriptMainWorld(code) {
+  async _executeHistoryFallback(direction) {
+    const dir = String(direction || '').toLowerCase();
+    const runBack = dir === 'back';
+    const runForward = dir === 'forward';
+    if (!runBack && !runForward) {
+      return this._makeError('INVALID_ACTION', `Unknown history direction: ${direction}`);
+    }
     try {
-      const [injection] = await chrome.scripting.executeScript({
+      await chrome.scripting.executeScript({
         target: { tabId: this.tabId },
         world: 'MAIN',
-        func: (source) => {
-          try {
-            // eslint-disable-next-line no-eval
-            const value = (0, eval)(source);
-            return {
-              success: true,
-              result: value !== undefined ? String(value).slice(0, 5000) : 'undefined',
-            };
-          } catch (err) {
-            return {
-              success: false,
-              code: 'JS_EXEC_FAILED',
-              error: err?.message || String(err),
-            };
+        func: (goBack) => {
+          if (goBack) {
+            window.history.back();
+          } else {
+            window.history.forward();
           }
         },
-        args: [String(code ?? '')],
+        args: [runBack],
       });
-      return injection?.result || this._makeError('JS_EXEC_FAILED', 'No result from JS execution');
+      return { success: true };
     } catch (err) {
-      return this._makeError('JS_EXEC_FAILED', err.message);
+      return this._makeError('HISTORY_NAV_FAILED', err?.message || String(err), { direction: dir });
     }
   }
 
@@ -2308,13 +2258,15 @@ export class Agent {
         if (typeof chrome.tabs.goBack === 'function') {
           await chrome.tabs.goBack(this.tabId);
         } else {
-          await this._executeJavaScriptMainWorld('history.back()');
+          const fallback = await this._executeHistoryFallback('back');
+          if (fallback?.success === false) return fallback;
         }
       } else if (direction === 'forward') {
         if (typeof chrome.tabs.goForward === 'function') {
           await chrome.tabs.goForward(this.tabId);
         } else {
-          await this._executeJavaScriptMainWorld('history.forward()');
+          const fallback = await this._executeHistoryFallback('forward');
+          if (fallback?.success === false) return fallback;
         }
       } else {
         return this._makeError('INVALID_ACTION', `Unknown history direction: ${direction}`);
@@ -2503,14 +2455,14 @@ export class Agent {
     const active = args.active !== false;
     const tab = await chrome.tabs.create({ url, active });
     if (tab?.id) {
-      // Try to add the new tab to the "Browser Agent" group
+      // Try to add the new tab to the "BrowseAgent" group
       try {
-        const existingGroups = await chrome.tabGroups.query({ title: 'Browser Agent' });
+        const existingGroups = await chrome.tabGroups.query({ title: 'BrowseAgent' });
         if (existingGroups.length > 0) {
           await chrome.tabs.group({ tabIds: [tab.id], groupId: existingGroups[0].id });
         } else {
           const groupId = await chrome.tabs.group({ tabIds: [tab.id] });
-          await chrome.tabGroups.update(groupId, { title: 'Browser Agent', color: 'blue' });
+          await chrome.tabGroups.update(groupId, { title: 'BrowseAgent', color: 'blue' });
         }
       } catch (err) {
         debugWarn('tool.openTab.tabGrouping', err);
@@ -2639,12 +2591,6 @@ export class Agent {
     if (safeTool === 'press_key') {
       const key = String(args.key || '').trim().toLowerCase();
       if (key === 'enter' || key === 'return') return 'press_enter';
-    }
-    if (safeTool === 'javascript') {
-      const code = String(args.code || '');
-      if (/(submit|delete|remove|checkout|purchase|pay|transfer|confirm|save\s*changes?|account)/i.test(code)) {
-        return 'javascript_risky_pattern';
-      }
     }
     return null;
   }
@@ -3037,17 +2983,6 @@ export class Agent {
   }
 
   /**
-   * Check JavaScript code for dangerous patterns.
-   */
-  _checkJsSafety(code) {
-    if (!code) return null;
-    for (const { re, msg } of BLOCKED_JS_PATTERNS) {
-      if (re.test(code)) return msg;
-    }
-    return null;
-  }
-
-  /**
    * Wait for tab navigation to complete.
    */
   async _waitForDomSettle(timeoutMs = 3000, quietMs = 450) {
@@ -3122,12 +3057,6 @@ export class Agent {
       this._planApprovalResolver = null;
       resolver(false);
     }
-    if (this._jsDomainResolver) {
-      const resolver = this._jsDomainResolver;
-      this._jsDomainResolver = null;
-      this._pendingJsDomain = '';
-      resolver(false);
-    }
   }
 
   approvePlan() {
@@ -3135,62 +3064,6 @@ export class Agent {
       const resolver = this._planApprovalResolver;
       this._planApprovalResolver = null;
       resolver(true);
-    }
-  }
-
-  /** Pause and ask the user whether JavaScript is allowed on the given domain. */
-  async _waitForJsDomainApproval(domain) {
-    this._activePauseKind = 'js_domain_permission';
-    this._pendingJsDomain = String(domain || '').trim().toLowerCase();
-    this.status = 'paused_waiting_user';
-    this._notify('paused_waiting_user');
-    this._emitIntervention({
-      type: 'jsDomainPermission',
-      domain,
-      message: `The agent wants to execute JavaScript on "${domain}". Allow this for the current task?`,
-    });
-    return new Promise((resolve) => {
-      this._jsDomainResolver = resolve;
-      this._jsDomainDenied = false;
-    });
-  }
-
-  /** Called by service worker when user approves JS on a domain. */
-  allowJsDomain(domain) {
-    const normalizedDomain = String(domain || this._pendingJsDomain || '').trim().toLowerCase();
-    if (normalizedDomain) {
-      this.trustedJsDomains.add(normalizedDomain);
-      // Persist trust for this session's storage
-      try {
-        chrome.storage.local.get('trustedJsDomains').then(({ trustedJsDomains: stored = [] }) => {
-          const updated = Array.from(new Set([...stored, normalizedDomain]));
-          chrome.storage.local.set({ trustedJsDomains: updated });
-        }).catch(() => { });
-      } catch (err) {
-        debugWarn('jsDomain.persistTrustedDomain', err);
-      }
-    }
-    if (this._jsDomainResolver) {
-      const resolver = this._jsDomainResolver;
-      this._jsDomainResolver = null;
-      this._activePauseKind = '';
-      this._pendingJsDomain = '';
-      this.status = 'running';
-      this._notify('running');
-      resolver(true);
-    }
-  }
-
-  /** Called by service worker when user denies JS on a domain. */
-  denyJsDomain() {
-    if (this._jsDomainResolver) {
-      const resolver = this._jsDomainResolver;
-      this._jsDomainResolver = null;
-      this._activePauseKind = '';
-      this._pendingJsDomain = '';
-      this.status = 'running';
-      this._notify('running');
-      resolver(false);
     }
   }
 
@@ -3203,12 +3076,6 @@ export class Agent {
       const resolver = this._resumeResolver;
       this._resumeResolver = null;
       resolver(true);
-      return true;
-    }
-
-    // JS domain permission pause: "Resume" should act as explicit allow.
-    if (this._jsDomainResolver && this._activePauseKind === 'js_domain_permission') {
-      this.allowJsDomain(this._pendingJsDomain);
       return true;
     }
     return false;
@@ -3510,15 +3377,6 @@ export class Agent {
           avoidRepeat: true,
           message: 'Choose a different allowed URL or source.',
         };
-      case 'JS_BLOCKED':
-      case 'JS_DOMAIN_BLOCKED':
-        return {
-          strategy: 'fallback_non_js_tool',
-          nextTool: 'read_page',
-          args: {},
-          avoidRepeat: true,
-          message: 'Use read_page/get_page_text/find instead of javascript.',
-        };
       case 'CONFIRMATION_REQUIRED':
         return {
           strategy: 'retry_with_confirmation',
@@ -3545,7 +3403,7 @@ export class Agent {
             nextTool: 'press_key',
             args: { key: 'Enter' },
             avoidRepeat: true,
-            message: 'Action relies on blocked javascript: link; try keyboard submit or javascript tool fallback.',
+            message: 'Action relies on blocked javascript: link; try keyboard submit or a normal page control.',
           };
         }
         return {
@@ -3906,6 +3764,19 @@ export class Agent {
     return this._buildActionIntentKey(tool, leftArgs) === this._buildActionIntentKey(tool, rightArgs);
   }
 
+  _shouldAllowImmediateRepeat(tool, args = {}) {
+    const toolName = String(tool || '').trim();
+    if (toolName !== 'scroll') return false;
+    const previousAction = [...(this.history || [])]
+      .reverse()
+      .find((item) => item?.type === 'action');
+    if (!previousAction || previousAction.tool !== 'scroll') return false;
+    if (!this._isSameActionIntent('scroll', previousAction.args || {}, args || {})) return false;
+    if (previousAction.result?.success === false) return false;
+    if (previousAction.result?.moved === false) return false;
+    return previousAction.result?.moved === true;
+  }
+
   _applyBlockedActionLoopGuard(tool, args, result) {
     if (!this._isBlockedActionFailure(tool, result)) {
       this._lastBlockedAction = null;
@@ -4088,8 +3959,6 @@ export class Agent {
         return Number(result?.charCount || 0) >= 900;
       case 'find':
         return Array.isArray(result) && result.length >= 3;
-      case 'javascript':
-        return true;
       default:
         return false;
     }
@@ -4546,7 +4415,7 @@ export class Agent {
     if (words.length <= 3) return '';
     const stopWords = new Set([
       'the', 'a', 'an', 'to', 'for', 'and', 'or', 'of', 'in', 'on', 'at', 'from', 'with',
-      'что', 'как', 'это', 'для', 'про', 'или', 'на', 'по', 'из', 'в', 'к', 'и',
+      'what', 'how', 'this', 'that', 'about', 'for', 'or', 'on', 'by', 'from', 'in', 'to', 'and',
     ]);
     const filtered = words.filter((w) => w.length > 2 && !stopWords.has(w));
     const base = filtered.length >= 3 ? filtered : words;
@@ -4554,15 +4423,6 @@ export class Agent {
     if (!compact) return '';
     if (compact === text) return '';
     return compact.slice(0, 140);
-  }
-
-  _shouldAvoidJavascriptForGoal() {
-    const blockedHintTool = String(this?._lastBlockedAction?.hint?.nextTool || '').trim().toLowerCase();
-    if (blockedHintTool === 'javascript') return false;
-    if (Number(this._noProgressStreak || 0) >= NO_PROGRESS_WARN_THRESHOLD) return false;
-    const goal = String(this._goal || '').toLowerCase();
-    const infoLike = /(как\s+пишется|как\s+правильно|найди|узнай|проверь|search|find|lookup|look up|spelling)/i.test(goal);
-    return infoLike && Number(this._toolFailStreak || 0) < 2;
   }
 
   _sanitizePlannedAction(nextAction = {}) {
@@ -4646,13 +4506,9 @@ export class Agent {
     }
 
     if (tool === 'notify_connector') {
-      if (!args.connectorId && /telegram|телеграм/i.test(String(this._goal || ''))) {
+      if (!args.connectorId && /telegram/i.test(String(this._goal || ''))) {
         if (this._connectedConnectorIds.includes('telegram')) args.connectorId = 'telegram';
       }
-    }
-
-    if (tool === 'javascript' && this._shouldAvoidJavascriptForGoal()) {
-      return { tool: 'read_page', args: {} };
     }
 
     if (this._shouldForceVisionProbe(tool)) {
@@ -4830,7 +4686,7 @@ export class Agent {
 
   _validateNavigateUrl(url) {
     let raw = String(url || '').trim();
-    // Auto-add https:// if LLM sends bare domain (e.g. "gramota.ru")
+    // Auto-add https:// if LLM sends bare domain (e.g. "example.com")
     if (raw && !raw.includes('://') && !raw.startsWith('about:')) {
       raw = 'https://' + raw;
     }
@@ -4983,9 +4839,9 @@ export class Agent {
     const text = String(this._goal || '').toLowerCase();
     const allowTerms = [
       'confirm', 'i confirm', 'i approve', 'approved', 'yes, proceed',
-      'подтверждаю', 'разрешаю', 'одобряю', 'можно отправить', 'можно удалить',
+      'allowed', 'permission granted', 'you may send', 'you may delete',
       'send email', 'delete', 'remove', 'pay', 'purchase', 'checkout', 'transfer',
-      'отправь', 'удали', 'оплати', 'переведи', 'купи',
+      'send', 'delete it', 'pay now', 'transfer now', 'buy',
     ];
     return allowTerms.some((term) => text.includes(term));
   }
@@ -4997,58 +4853,17 @@ export class Agent {
       'sign in page',
       'auth page',
       'oauth page',
-      'страница входа',
-      'страницу входа',
-      'экран входа',
-      'окно входа',
+      'authentication page',
+      'sign-in screen',
+      'login screen',
+      'auth screen',
     ].some((term) => text.includes(term));
   }
 
   _shouldSkipInitialSnapshot(goalText = '', currentUrl = '') {
-    const url = String(currentUrl || this._lastKnownUrl || '').trim();
-    if (!url) return false;
-
-    let host = '';
-    try {
-      host = new URL(url).hostname.toLowerCase();
-    } catch {
-      return false;
-    }
-
-    const heavyHosts = [
-      'keep.google.com',
-      'docs.google.com',
-      'mail.google.com',
-      'calendar.google.com',
-      'notion.so',
-      'www.notion.so',
-      'figma.com',
-      'www.figma.com',
-    ];
-    const isHeavyHost = heavyHosts.some((item) => host === item || host.endsWith(`.${item}`));
-    if (!isHeavyHost) return false;
-
-    const goal = String(goalText || this._goal || '').toLowerCase().trim();
-    if (!goal) return false;
-
-    const genericTokens = new Set(['www', 'com', 'ru', 'net', 'org', 'io', 'co', 'app', 'dev', 'google']);
-    const hostTokens = host
-      .split('.')
-      .map((p) => p.trim())
-      .filter((p) => p.length >= 3)
-      .filter((p) => !genericTokens.has(p));
-    if (hostTokens.some((token) => goal.includes(token))) {
-      return false;
-    }
-
-    const hasExternalSiteCue = (
-      /https?:\/\//i.test(goal) ||
-      /\b(?:на|on)\s+сайт/i.test(goal) ||
-      /\b[a-z0-9-]+\.[a-z]{2,}\b/i.test(goal) ||
-      /(?:^|\s)[a-z0-9-]+\s+ру(?:\s|$)/i.test(goal) ||
-      /(?:^|\s)[\p{L}\p{N}-]+\s+ру(?:\s|$)/u.test(goal)
-    );
-    return hasExternalSiteCue;
+    void goalText;
+    void currentUrl;
+    return false;
   }
 
   _containsAny(haystack, terms) {
@@ -5095,25 +4910,29 @@ export class Agent {
     let hasPasswordField = false;
     let hasOtpField = false;
     try {
-      const probe = await this._executeJavaScriptMainWorld(`(() => {
-        const isVis = (el) => {
-          if (!el) return false;
-          const r = el.getBoundingClientRect();
-          if (!r.width || !r.height) return false;
-          const s = window.getComputedStyle(el);
-          return s.display !== 'none' && s.visibility !== 'hidden' && s.opacity !== '0';
-        };
-        const pass = Array.from(document.querySelectorAll('input[type="password"], input[name*="pass" i], input[id*="pass" i]'));
-        const otp = Array.from(document.querySelectorAll('input[autocomplete="one-time-code"], input[name*="otp" i], input[id*="otp" i], input[name*="verification" i], input[id*="verification" i]'));
-        return JSON.stringify({
-          hasPasswordField: pass.some(isVis),
-          hasOtpField: otp.some(isVis)
-        });
-      })()`);
-      if (probe?.success && typeof probe.result === 'string' && probe.result.startsWith('{')) {
-        const parsed = JSON.parse(probe.result);
-        hasPasswordField = parsed?.hasPasswordField === true;
-        hasOtpField = parsed?.hasOtpField === true;
+      const [probe] = await chrome.scripting.executeScript({
+        target: { tabId: this.tabId },
+        world: 'MAIN',
+        func: () => {
+          const isVis = (el) => {
+            if (!el) return false;
+            const r = el.getBoundingClientRect();
+            if (!r.width || !r.height) return false;
+            const s = window.getComputedStyle(el);
+            return s.display !== 'none' && s.visibility !== 'hidden' && s.opacity !== '0';
+          };
+          const pass = Array.from(document.querySelectorAll('input[type="password"], input[name*="pass" i], input[id*="pass" i]'));
+          const otp = Array.from(document.querySelectorAll('input[autocomplete="one-time-code"], input[name*="otp" i], input[id*="otp" i], input[name*="verification" i], input[id*="verification" i]'));
+          return {
+            hasPasswordField: pass.some(isVis),
+            hasOtpField: otp.some(isVis),
+          };
+        },
+      });
+      const parsed = probe?.result;
+      if (parsed && typeof parsed === 'object') {
+        hasPasswordField = parsed.hasPasswordField === true;
+        hasOtpField = parsed.hasOtpField === true;
       }
     } catch {
       // No-op, fallback to URL/title/text heuristics.

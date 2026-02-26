@@ -373,8 +373,10 @@ async function getConnectionsState() {
 }
 
 function isRouteEnabled(state, routeId) {
-  if (!state?.routing) return routeId === 'desktop';
-  return state.routing[routeId] === true;
+  if (!routeId) return false;
+  const explicit = state?.routing?.[routeId];
+  if (typeof explicit === 'boolean') return explicit;
+  return routeId === 'desktop';
 }
 
 function isConnectorRouteEnabled(state, connectorId) {
@@ -928,16 +930,6 @@ async function handleSidePanelMessage(msg, port) {
 
     case 'approvePlan': {
       if (activeAgent) activeAgent.approvePlan();
-      break;
-    }
-
-    case 'jsDomainAllow': {
-      if (activeAgent) activeAgent.allowJsDomain(msg.domain);
-      break;
-    }
-
-    case 'jsDomainDeny': {
-      if (activeAgent) activeAgent.denyJsDomain();
       break;
     }
 

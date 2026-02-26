@@ -42,7 +42,6 @@ export const SYSTEM_PROMPT = `You are a browser automation agent. Execute exactl
 - Understanding: read_page, extract_structured, get_page_text, find, find_text, screenshot.
 - Navigation: navigate, back, forward, reload, open_tab, list_tabs, switch_tab, close_tab, switch_frame.
 - Actions: click, type, select, hover, scroll, press_key, wait_for.
-- Fallback: javascript — for anything not covered by dedicated tools (drag-and-drop, file uploads, console reading, DOM manipulation, etc.).
 - External APIs: http_request.
 - Connectors: notify_connector — deliver interim or final findings to a connected destination.
 - Memory: save_progress — store partial findings so they are not lost across long tasks.
@@ -225,10 +224,10 @@ Step 3: get_page_text → extract results
 Step 4: done(summary="Searched for python tutorials", answer="Found 15 results:\n1. Intro to Python — beginner guide covering basics, variables, loops\n2. Advanced Python Patterns — decorators, generators, context managers\n3. Python Web Dev with Flask — building REST APIs step by step\n4. Data Science with Python — pandas, numpy, matplotlib tutorial\n5. Python Testing Best Practices — pytest, mocking, CI integration")
 
 Example 4 — News lookup:
-Task: "найди новости Пензы на сегодня"
-Step 1: navigate("https://www.google.com/search?q=новости+Пензы+сегодня") → read pageText from result
+Task: "find today's Penza news"
+Step 1: navigate("https://www.google.com/search?q=Penza+news+today") → read pageText from result
 Step 2: get_page_text → extract news headlines and details
-Step 3: done(summary="Найдены новости Пензы", answer="Новости Пензы на сегодня:\n1. Заголовок первой новости — краткое описание события, источник\n2. Заголовок второй новости — краткое описание, источник\n3. Заголовок третьей новости — краткое описание, источник\n...")`;
+Step 3: done(summary="Found Penza news", answer="Penza news today:\n1. First headline — short event summary, source\n2. Second headline — short summary, source\n3. Third headline — short summary, source\n...")`;
 
 export const SILICONFLOW_GLM_SYSTEM_ADDENDUM = `
 

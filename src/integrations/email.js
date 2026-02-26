@@ -8,8 +8,8 @@ export async function send(conn, payload, testMode = false) {
     throw new Error('Email service must be an HTTP endpoint');
   }
   const body = testMode
-    ? { to, subject: 'Browser Agent test', text: 'Email connector test successful.' }
-    : { to, subject: 'Browser Agent task result', text: payload.text, payload };
+    ? { to, subject: 'BrowseAgent test', text: 'Email connector test successful.' }
+    : { to, subject: 'BrowseAgent task result', text: payload.text, payload };
   await safeFetchJson(service, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

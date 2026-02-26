@@ -196,7 +196,7 @@ test('runReflection stops before provider.chat when pre-send token estimate exce
 
 test('runReflection falls back when reflection soft-timeout is hit', async () => {
   const agent = makeAgent();
-  agent._goal = 'как пишется телеграм на сайте грамота ру';
+  agent._goal = 'find information about telegram';
   agent._reflectionChatSoftTimeoutMs = 1000;
   let calls = 0;
   agent.provider = {
@@ -209,7 +209,7 @@ test('runReflection falls back when reflection soft-timeout is hit', async () =>
   const startedAt = Date.now();
   const out = await agent._runReflection(
     1,
-    [{ role: 'user', content: 'Find spelling on gramota.ru' }],
+    [{ role: 'user', content: 'Find the correct spelling' }],
     [{ name: 'find_text' }, { name: 'get_page_text' }],
     { total: 10, used: 1, remaining: 9 },
   );
@@ -219,7 +219,7 @@ test('runReflection falls back when reflection soft-timeout is hit', async () =>
   assert.equal(out.ok, true);
   assert.equal(out.fallback, true);
   assert.match(String(out.error || ''), /timed out/i);
-  assert.equal(out.state?.actions?.[0]?.tool, 'find_text');
+  assert.equal(out.state?.actions?.[0]?.tool, 'get_page_text');
   assert.ok(elapsedMs >= 900 && elapsedMs < 5000);
 });
 
@@ -269,7 +269,7 @@ test('shouldEscalateForHumanGuidance triggers on near-medium confidence with dup
       confidence: 0.46,
       facts: ['dictionary result found', 'support answer found'],
       unknowns: ['final wording'],
-      actions: [{ tool: 'find_text', args: { query: 'ютуб' } }],
+      actions: [{ tool: 'find_text', args: { query: 'youtube' } }],
     },
     { remaining: 44, total: 50 },
   );
@@ -289,7 +289,7 @@ test('buildHumanGuidanceBlockers explains procedural pause reasons when unknowns
       confidence: 0.47,
       facts: ['dictionary entry located'],
       unknowns: [],
-      actions: [{ tool: 'find_text', args: { query: 'ютуб' } }],
+      actions: [{ tool: 'find_text', args: { query: 'youtube' } }],
     },
     { remaining: 43, total: 50 },
   );
@@ -302,7 +302,7 @@ test('buildHumanGuidanceBlockers explains procedural pause reasons when unknowns
 
 test('maybeAutoCompleteFromEvidence returns complete when facts are sufficient under low-signal loop pressure', () => {
   const agent = makeAgent();
-  agent._goal = 'как пишется ватсап на грамота ру';
+  agent._goal = 'how to spell whatsapp on gramota.ru';
   agent._isNavigateOnly = true;
   agent._checkPrematureDone = () => ({ ok: true });
   agent._validateDoneQuality = () => ({ ok: true });
@@ -314,13 +314,13 @@ test('maybeAutoCompleteFromEvidence returns complete when facts are sufficient u
       sufficiency: false,
       confidence: 0.48,
       facts: [
-        'Словарная статья: ватса́п — существительное, мужской род, 2-е склонение',
-        'Рекомендуемое написание: «Ватсап»',
+        'Dictionary entry: whatsapp is a noun.',
+        'Recommended spelling: "WhatsApp"',
       ],
       unknowns: [],
-      summary: 'На Грамоте рекомендуется писать: «Ватсап».',
-      answer: 'Словарная фиксация: «ватса́п». Рекомендованное написание в ответах службы: «Ватсап».',
-      actions: [{ tool: 'find_text', args: { query: 'ватсап' } }],
+      summary: 'Gramota recommends using: "WhatsApp".',
+      answer: 'Dictionary record: "whatsapp". Recommended spelling in support replies: "WhatsApp".',
+      actions: [{ tool: 'find_text', args: { query: 'whatsapp' } }],
     },
     { remaining: 44, total: 50 },
     8,
@@ -329,7 +329,7 @@ test('maybeAutoCompleteFromEvidence returns complete when facts are sufficient u
   assert.ok(out);
   assert.equal(out.success, true);
   assert.equal(out.status, 'complete');
-  assert.match(String(out.answer || ''), /Ватсап/i);
+  assert.match(String(out.answer || ''), /WhatsApp/i);
 });
 
 test('pauseForHumanGuidance pauses and resumes agent loop', async () => {
@@ -395,26 +395,26 @@ test('requestPartialCompletion exits guidance pause as aborted signal', async ()
 test('handleToolCalls returns partial when no-progress persists after human-guidance escalation', async () => {
   const agent = makeAgent();
   agent.status = 'running';
-  agent._goal = 'найти как пишется камаз на грамота ру';
+  agent._goal = 'find how to spell kamaz on gramota.ru';
   agent._humanGuidanceEscalationCount = 1;
   agent._noProgressStreak = 8;
   agent._reflectionState = {
     facts: [
-      'Словарь фиксирует написание «КамА́З»',
-      'Допустимы варианты «КамА́З» и «КАМА́З» в словарной фиксации',
+      'Dictionary records the spelling "KamAZ".',
+      'Variants "KamAZ" and "KAMAZ" are both listed in dictionary records.',
     ],
     unknowns: [],
     sufficiency: false,
     confidence: 0.46,
     summary: '',
     answer: '',
-    actions: [{ tool: 'find_text', args: { query: 'камаз' } }],
-    next_action: { tool: 'find_text', args: { query: 'камаз' } },
+    actions: [{ tool: 'find_text', args: { query: 'kamaz' } }],
+    next_action: { tool: 'find_text', args: { query: 'kamaz' } },
   };
   agent._executeTool = async () => ({
     success: true,
     url: 'https://gramota.ru/poisk?query=%D0%BA%D0%B0%D0%BC%D0%B0%D0%B7&mode=all',
-    title: 'Поиск по Грамоте',
+    title: 'Gramota Search',
     tree: {},
   });
 
@@ -438,26 +438,26 @@ test('handleToolCalls returns partial when no-progress persists after human-guid
 test('handleToolCalls returns partial when no-progress persists and best-effort facts exist', async () => {
   const agent = makeAgent();
   agent.status = 'running';
-  agent._goal = 'найди как пишется ватсап на грамота ру';
+  agent._goal = 'find how to spell whatsapp on gramota.ru';
   agent._humanGuidanceEscalationCount = 0;
   agent._noProgressStreak = 8;
   agent._reflectionState = {
     facts: [
-      'Словарная статья: ватса́п — существительное, мужской род, 2-е склонение',
-      'Рекомендуемое нормативное написание — «Ватсап»',
+      'Dictionary entry: whatsapp is a noun.',
+      'Recommended formal spelling is "WhatsApp".',
     ],
     unknowns: [],
     sufficiency: false,
     confidence: 0.33,
     summary: '',
     answer: '',
-    actions: [{ tool: 'find_text', args: { query: 'ватсап gramota.ru' } }],
-    next_action: { tool: 'find_text', args: { query: 'ватсап gramota.ru' } },
+    actions: [{ tool: 'find_text', args: { query: 'whatsapp gramota.ru' } }],
+    next_action: { tool: 'find_text', args: { query: 'whatsapp gramota.ru' } },
   };
   agent._executeTool = async () => ({
     success: true,
     url: 'https://gramota.ru/poisk?query=%D0%B2%D0%B0%D1%82%D1%81%D0%B0%D0%BF&mode=all',
-    title: 'Поиск по Грамоте',
+    title: 'Gramota Search',
     currentIndex: 0,
     matches: [],
   });
@@ -469,14 +469,14 @@ test('handleToolCalls returns partial when no-progress persists and best-effort 
   const out = await agent._handleToolCalls(
     14,
     messages,
-    { toolCalls: [{ id: 'tc2', name: 'find_text', arguments: { query: 'ватсап gramota.ru' } }] },
+    { toolCalls: [{ id: 'tc2', name: 'find_text', arguments: { query: 'whatsapp gramota.ru' } }] },
     { remaining: 36, total: 50 },
   );
 
   assert.ok(out);
   assert.equal(out.status, 'partial');
   assert.match(String(out.reason || ''), /Returning best-effort result/i);
-  assert.match(String(out.answer || ''), /Ватсап/i);
+  assert.match(String(out.answer || ''), /WhatsApp/i);
 });
 
 test('checkResourceBudgets triggers early timeout on aggressive token burn-rate projection', () => {
@@ -503,7 +503,7 @@ test('buildSerpLoopGuard blocks repeated read-only parsing on same SERP', () => 
     {
       type: 'action',
       tool: 'find_text',
-      args: { query: 'browser agent' },
+      args: { query: 'browseagent' },
       result: { success: true, found: false, count: 0, url: 'https://www.google.com/search?q=browser+agent' },
     },
     {
@@ -564,18 +564,9 @@ test('detectDeadEndNavigationResult identifies 404-like pages and proposes recov
   assert.ok(candidates.some((url) => url === 'https://example.com/posts' || url === 'https://example.com/'));
 });
 
-test('resume handles JS domain permission pause by approving current domain', async () => {
+test('resume returns false when paused without a pending resolver', () => {
   const agent = makeAgent();
-  agent.status = 'running';
-
-  const pending = agent._waitForJsDomainApproval('slovari.ru');
-  assert.equal(agent.status, 'paused_waiting_user');
-
+  agent.status = 'paused_waiting_user';
   const resumed = agent.resume();
-  assert.equal(resumed, true);
-
-  const approved = await pending;
-  assert.equal(approved, true);
-  assert.equal(agent.status, 'running');
-  assert.ok(agent.trustedJsDomains.has('slovari.ru'));
+  assert.equal(resumed, false);
 });

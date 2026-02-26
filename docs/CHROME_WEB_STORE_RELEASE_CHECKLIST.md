@@ -7,7 +7,7 @@ Date: February 25, 2026
 - [x] Manifest version is `1.0.2`
 - [x] Extension tests pass (`node --test`)
 - [x] Store upload ZIP prepared:
-  `release/browser-agent-v1.0.2-chrome-web-store.zip`
+  `release/browseagent-v1.0.2-chrome-web-store.zip`
 - [x] ZIP includes runtime files only (`manifest.json`, `src/`, `icons/`, `_locales/`, `LICENSE`)
 
 ## Policy/readiness
@@ -36,6 +36,6 @@ Date: February 25, 2026
 
 ## Submission
 
-- [ ] Upload `release/browser-agent-v1.0.2-chrome-web-store.zip`
+- [ ] Upload `release/browseagent-v1.0.2-chrome-web-store.zip`
 - [ ] Fix any automated warnings in draft review
 - [ ] Submit for review

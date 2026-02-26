@@ -1,6 +1,6 @@
-# Browser Agent — Pre-Release E2E Test Checklist
+# BrowseAgent — Pre-Release E2E Test Checklist
 
-> Run this checklist against a freshly packed extension (unpacked load from `browser-agent-ext/`)
+> Run this checklist against a freshly packed extension (unpacked load from `browseagent-ext/`)
 > before every release candidate. Mark each item ✅ pass / ❌ fail / ⏭ skip (with reason).
 
 ---
@@ -54,7 +54,7 @@
 
 | # | Step | Expected |
 |---|------|----------|
-| 4.1 | Disable Plan Mode; start a multi-step task: `"Search 'browser agent extension' on Google and read the first result title"` | Steps start appearing |
+| 4.1 | Disable Plan Mode; start a multi-step task: `"Search 'browseagent extension' on Google and read the first result title"` | Steps start appearing |
 | 4.2 | After 2–3 steps appear, close the side panel | Agent keeps running in background |
 | 4.3 | Re-open within 30 s | **All steps that occurred during disconnect are replayed** in the step log, no gap |
 | 4.4 | Wait for task completion | Final result banner appears; desktop notification fires |
@@ -84,22 +84,22 @@
 
 ---
 
-## 7. JavaScript Domain — Allow
+## 7. JavaScript Execution — Disabled by Design
 
 | # | Step | Expected |
 |---|------|----------|
-| 7.1 | Run task that requires JS execution (e.g. `"Get the title of the current page using JavaScript"`) on a site not previously trusted | JS permission banner appears: `"Allow JavaScript on domain X?"` |
-| 7.2 | Click **Allow** | Banner hides; JS executes; task completes |
-| 7.3 | Run same JS task again on the same domain | **No permission prompt** (domain is trusted for the session) |
+| 7.1 | Run task that explicitly asks to execute custom JavaScript | Agent does **not** execute arbitrary code; uses supported tools only or fails gracefully |
+| 7.2 | Check step log/interventions | No domain-level JS permission prompt appears |
+| 7.3 | Verify extension console | No eval/new Function execution path is used |
 
 ---
 
-## 8. JavaScript Domain — Deny
+## 8. JavaScript Links Guard
 
 | # | Step | Expected |
 |---|------|----------|
-| 8.1 | Run a JS task on an untrusted domain; click **Deny** | Agent receives denial; continues task with non-JS fallback or gracefully fails with explanation |
-| 8.2 | No unhandled JS errors in extension console | ✓ |
+| 8.1 | On a page with a `javascript:` anchor, ask the agent to click that control | Action is blocked with a clear error/hint to use another interaction method |
+| 8.2 | Agent continues with non-script alternatives (e.g., key press or standard controls) | ✓ |
 
 ---
 

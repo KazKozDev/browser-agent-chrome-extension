@@ -1,5 +1,5 @@
 {
-  "name": "browser-agent-ext",
+  "name": "browseagent-ext",
   "private": true,
   "type": "module",
   "scripts": {

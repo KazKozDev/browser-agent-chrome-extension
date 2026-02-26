@@ -74,6 +74,7 @@ const MAX_HISTORY_ITEMS = 30;
 const CONNECTIONS_STORAGE_KEY = 'connectionsState';
 const SHORTCUTS_STORAGE_KEY = 'savedShortcuts';
 const MAX_SHORTCUTS = 40;
+const MAX_SUGGESTION_CHIPS = 2;
 
 function scheduleReconnect(delayMs = 300) {
   if (reconnectTimer) return;
@@ -513,11 +514,6 @@ function adjustGoalInputHeight() {
 
 sendBtn.addEventListener('click', () => {
   if (isPaused) {
-    if (String(activeInterventionDetails?.type || '') === 'jsDomainPermission') {
-      const domain = String(activeInterventionDetails?.domain || '').trim();
-      sendMsg({ type: 'jsDomainAllow', domain });
-      return;
-    }
     sendMsg({ type: 'resumeTask' });
     return;
   }
@@ -798,7 +794,7 @@ function buildContextualPrompts(context) {
 
 function renderSuggestionCloud() {
   if (!suggestionsContainer) return;
-  const prompts = buildContextualPrompts(activeTabContext);
+  const prompts = buildContextualPrompts(activeTabContext).slice(0, MAX_SUGGESTION_CHIPS);
 
   suggestionsContainer.innerHTML = prompts
     .map((p) => `<button class="prompt-chip" data-prompt="${escapeAttr(p)}">${escapeHtml(p)}</button>`)
@@ -992,26 +988,12 @@ function updateStatus(status) {
 function showManualIntervention(details = {}) {
   activeInterventionDetails = details && typeof details === 'object' ? { ...details } : null;
   const message = details.message || 'Manual intervention required.';
-  const isJsDomainPermission = String(details.type || '') === 'jsDomainPermission';
   const isHumanGuidance = String(details.type || '') === 'humanGuidance';
   const isLimitGuard = String(details.type || '') === 'limitGuard' || String(details.kind || '') === 'limit_guard';
   resultBanner.style.display = '';
   resultBanner.className = 'result-banner warning';
   resultBanner.dataset.mode = 'manual';
-  if (isJsDomainPermission) {
-    const domain = String(details.domain || '').trim();
-    resultBanner.innerHTML = `
-      <div class="result-header">${icon('bolt')} Permission required</div>
-      <div style="margin-top:6px;color:var(--text);font-weight:400;">${escapeHtml(message)}</div>
-      ${domain ? `<div style="margin-top:6px;color:var(--text2);font-size:11px;">Domain: ${escapeHtml(domain)}</div>` : ''}
-      <div style="margin-top:8px;color:var(--text2);font-size:11px;">Allow to continue this step, or block JavaScript for this domain.</div>
-      <div class="manual-actions">
-        <button id="manualAllowJsBtn">Allow</button>
-        <button id="manualDenyJsBtn">Block</button>
-        <button id="manualStopBtn">Stop</button>
-      </div>
-    `;
-  } else if (isLimitGuard) {
+  if (isLimitGuard) {
     const limitReason = String(details.limitReason || '').trim();
     resultBanner.innerHTML = `
       <div class="result-header">${icon('bolt')} Paused: limit reached</div>
@@ -1094,13 +1076,6 @@ function showManualIntervention(details = {}) {
   document.getElementById('manualPartialBtn')?.addEventListener('click', () => {
     sendMsg({ type: 'finishPartialTask' });
   });
-  document.getElementById('manualAllowJsBtn')?.addEventListener('click', () => {
-    const domain = String(details.domain || '').trim();
-    sendMsg({ type: 'jsDomainAllow', domain });
-  });
-  document.getElementById('manualDenyJsBtn')?.addEventListener('click', () => {
-    sendMsg({ type: 'jsDomainDeny' });
-  });
   document.getElementById('manualStopBtn')?.addEventListener('click', () => {
     sendMsg({ type: 'stopTask' });
   });
@@ -1142,7 +1117,6 @@ function summarizeArgs(tool, args) {
     case 'switch_tab': return args.tabId ? `tab ${args.tabId}` : `index ${args.index}`;
     case 'open_tab': return args.url?.slice(0, 50);
     case 'close_tab': return args.tabId ? `tab ${args.tabId}` : 'current tab';
-    case 'javascript': return args.code?.slice(0, 40) + '...';
     case 'done': return args.summary?.slice(0, 50);
     case 'fail': return args.reason?.slice(0, 50);
     default: return '';
@@ -2095,27 +2069,38 @@ function renderConnections() {
   const connTarget = (id) => {
     if (id === 'desktop') return 'Browser';
     const c = getConnectionById(id);
-    if (!c || !c.connected) return 'not connected';
+    if (!c) return 'not configured';
+    if (!c.connected) return 'not connected';
     if (id === 'telegram') return c.values?.bot || 'Telegram';
     if (id === 'notion') return c.values?.database || 'Workspace';
     if (id === 'slack') return c.values?.webhookUrl ? 'Webhook' : 'not connected';
+    if (id === 'discord') return c.values?.webhookUrl ? 'Webhook' : 'not connected';
+    if (id === 'email') return c.values?.email || 'Email';
+    if (id === 'sheets') return c.values?.appScriptUrl ? 'Apps Script' : 'not connected';
+    if (id === 'airtable') return c.values?.baseId || 'Airtable';
+    if (c.custom) return c.values?.url ? 'Webhook' : (c.values?.name || c.label || 'Custom');
     return c.label;
   };
 
   const routes = [
-    { id: 'desktop', label: 'Desktop notification', icon: 'bell' },
-    { id: 'telegram', label: 'Telegram', icon: 'send' },
-    { id: 'notion', label: 'Notion', icon: 'notion' },
-    { id: 'slack', label: 'Slack', icon: 'message-square' },
+    { id: 'desktop', label: 'Desktop notification', icon: 'bell', connected: true },
+    ...integrations.map((conn) => ({
+      id: conn.id,
+      label: conn.custom ? (conn.values?.name || conn.label || 'Custom Webhook') : (conn.label || conn.id),
+      icon: conn.icon || 'cloud',
+      connected: !!conn.connected,
+    })),
   ];
   connRoutingList.innerHTML = routes.map((r) => {
+    const disabled = r.id === 'desktop' ? false : !r.connected;
     const on = r.id === 'desktop'
       ? connectionsState.routing?.desktop === true
-      : isConnectorRouteEnabled(r.id);
+      : (r.connected && isConnectorRouteEnabled(r.id));
+    const stateText = disabled ? 'not connected' : (on ? 'enabled' : 'disabled');
     return `
-    <div class="conn-route-row" data-route-id="${escapeAttr(r.id)}">
-      <label class="toggle-switch conn-route-switch" title="Toggle ${escapeAttr(r.label)}">
-        <input type="checkbox" class="conn-route-toggle-input" ${on ? 'checked' : ''} aria-label="Toggle ${escapeAttr(r.label)}">
+    <div class="conn-route-row${disabled ? ' disabled' : ''}" data-route-id="${escapeAttr(r.id)}">
+      <label class="toggle-switch conn-route-switch" title="${escapeAttr(`${r.label}: ${stateText}`)}">
+        <input type="checkbox" class="conn-route-toggle-input" ${on ? 'checked' : ''} ${disabled ? 'disabled' : ''} aria-label="Toggle ${escapeAttr(r.label)}">
         <span class="toggle-slider"></span>
       </label>
       <span class="conn-route-label">${icon(r.icon)} ${escapeHtml(r.label)}</span>
@@ -2186,6 +2171,7 @@ function renderConnections() {
       card.querySelector('[data-action="save"]')?.addEventListener('click', async () => {
         const conn = getConnectionById(connId);
         if (!conn) return;
+        const wasConnected = !!conn.connected;
         syncValuesFromInputs(conn);
         const missingFields = getMissingRequiredConnectionFields(conn);
         if (missingFields.length > 0) {
@@ -2200,6 +2186,10 @@ function renderConnections() {
         conn.lastError = '';
         conn.connected = true;
         conn.status = conn.status || 'ready';
+        if (!wasConnected) {
+          connectionsState.routing = connectionsState.routing || {};
+          connectionsState.routing[connId] = true;
+        }
         expandedConnectionIds.delete(connId);
         await saveConnectionsState();
         renderConnections();
@@ -2242,6 +2232,7 @@ function renderConnections() {
 
   connRoutingList.querySelectorAll('.conn-route-row .conn-route-toggle-input').forEach((toggleEl) => {
     toggleEl.addEventListener('change', async () => {
+      if (toggleEl.disabled) return;
       const row = toggleEl.closest('.conn-route-row');
       const routeId = row?.dataset.routeId;
       if (!routeId) return;

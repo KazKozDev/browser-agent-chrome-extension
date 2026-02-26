@@ -25,10 +25,17 @@ export class FireworksProvider extends BaseLLMProvider {
   }
 
   async chat(messages, tools = [], options = {}) {
+    // Fireworks requires stream=true for max_tokens > 4096.
+    // This provider uses non-streaming responses, so cap output tokens accordingly.
+    const requestedMaxTokens = Number(options.maxTokens || this.maxTokens);
+    const normalizedMaxTokens = Number.isFinite(requestedMaxTokens) && requestedMaxTokens > 0
+      ? Math.floor(requestedMaxTokens)
+      : this.maxTokens;
+
     const body = {
       model: this.model,
       messages,
-      max_tokens: options.maxTokens || this.maxTokens,
+      max_tokens: Math.min(normalizedMaxTokens, 4096),
       temperature: options.temperature ?? this.temperature,
       top_p: 0.95,  // Moonshot official recommendation for Kimi K2.5
       top_k: 40,

@@ -248,19 +248,6 @@ export const TOOLS = [
     },
   },
 
-  // ── JavaScript (universal fallback) ─────────────────────────────
-  {
-    name: 'javascript',
-    description: 'Execute JavaScript in the page context. Universal fallback for any action not covered by other tools: DOM manipulation, drag-and-drop, file uploads, form control, reading console/network, etc. Access to cookies, localStorage, and sessionStorage is blocked.',
-    parameters: {
-      type: 'object',
-      properties: {
-        code: { type: 'string', description: 'JavaScript code to execute. Returns the result of the last expression.' },
-      },
-      required: ['code'],
-    },
-  },
-
   // ── Tabs ────────────────────────────────────────────────────────
   {
     name: 'open_tab',

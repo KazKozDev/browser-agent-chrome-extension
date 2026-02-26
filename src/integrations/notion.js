@@ -13,7 +13,7 @@ export async function send(conn, payload, testMode = false) {
     await safeFetchJson('https://api.notion.com/v1/users/me', { headers }, 'notion.users.me');
     return;
   }
-  const title = (payload.taskName || payload.goal || payload.summary || 'Browser Agent Result').slice(0, 180);
+  const title = (payload.taskName || payload.goal || payload.summary || 'BrowseAgent Result').slice(0, 180);
   const body = {
     parent: { database_id: databaseId },
     properties: {

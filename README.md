@@ -1,11 +1,11 @@
 <p align="center">
-  <img src="icons/icon128.png" alt="Browser Agent icon" width="160" />
+  <img src="icons/icon128.png" alt="BrowseAgent icon" width="160" />
 </p>
 
-# Browser Agent (Beta) — Chrome Extension
+# BrowseAgent (Beta) — Chrome Extension
 
-[![Release](https://img.shields.io/github/v/release/KazKozDev/browser-agent-chrome-extension?label=release)](https://github.com/KazKozDev/browser-agent-chrome-extension/releases)
-[![Status](https://img.shields.io/badge/status-Public%20Beta-orange)](https://github.com/KazKozDev/browser-agent-chrome-extension/releases/tag/v1.0.2)
+[![Release](https://img.shields.io/github/v/release/KazKozDev/browseagent-chrome-extension?label=release)](https://github.com/KazKozDev/browseagent-chrome-extension/releases)
+[![Status](https://img.shields.io/badge/status-Public%20Beta-orange)](https://github.com/KazKozDev/browseagent-chrome-extension/releases/tag/v1.0.2)
 [![Chrome](https://img.shields.io/badge/chrome-MV3-4285F4?logo=googlechrome&logoColor=white)](https://developer.chrome.com/docs/extensions/develop/migrate/what-is-mv3)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
@@ -18,15 +18,15 @@ Latest stable build: **v1.0.2**
 **Query:**  
 "Open Wikipedia and find the article about Albert Einstein."
 
-![Browser Agent screenshot](docs/images/screen.png)
+![BrowseAgent screenshot](docs/images/screen.png)
 
-*Browser Agent Result: The Albert Einstein Wikipedia page is open, with the article content on the left and the info panel on the right.*
+*BrowseAgent Result: The Albert Einstein Wikipedia page is open, with the article content on the left and the info panel on the right.*
 
 ## Features
 
 ### Browsing & Navigation
 - Open any URL and navigate back/forward/reload.
-- Open, list, switch and close tabs; agent tabs auto-grouped as "Browser Agent".
+- Open, list, switch and close tabs; agent tabs auto-grouped as "BrowseAgent".
 - Switch between main document and iframes (`switch_frame`).
 - Restore previously captured page state via snapshots (URL/cookies/scroll).
 
@@ -34,7 +34,6 @@ Latest stable build: **v1.0.2**
 - Click (left/right/middle, single/double/triple).
 - Type into single or multiple fields in one call.
 - Select dropdown options, hover elements, scroll, press keys with modifiers.
-- JavaScript fallback tool for unsupported or custom page actions.
 
 ### Page Reading & Inspection
 - Accessibility tree reading with element structure.
@@ -56,8 +55,6 @@ Latest stable build: **v1.0.2**
 - **Notifications** — desktop alerts on task completion (route-aware).
 
 ### Safety & Permissions
-- JavaScript filtered by security rules — no cookies, auth headers, storage access.
-- **Per-domain JS permission** — asks before running scripts on new sites.
 - **Site blocklist** — UI-managed denylist + network-level DNR blocking (crypto/payment defaults included).
 - **Tracker & ad blocker** — optional DNR ruleset applied during runs.
 - Login, CAPTCHA and sensitive-action detection — agent pauses for manual help.
@@ -81,7 +78,6 @@ src/
 │   ├── fireworks.js         Fireworks (Kimi K2.5)
 │   ├── siliconflow.js       SiliconFlow (GLM-4.6V)
 │   ├── xai.js               xAI (Grok 4.1 Fast)
-│   ├── groq.js              Groq (Llama 4 Scout)
 │   ├── ollama.js            Ollama (local)
 │   └── index.js             Provider manager, tier info, config
 ├── sidepanel/
@@ -112,7 +108,6 @@ src/
 | `hover` | Hover over element |
 | `press_key` | Press key with optional modifiers |
 | `wait_for` | Wait for element/text/url/navigation/network-idle condition |
-| `javascript` | Filtered JS execution in page context |
 | `open_tab` | Open new tab |
 | `list_tabs` | List tabs in current window |
 | `switch_tab` | Switch active tab by ID/index |
@@ -131,7 +126,6 @@ src/
 |---|---|---|---|
 | Recommended | Fireworks | Kimi K2.5 | $0.60 in / $3.00 out |
 | Budget | xAI | Grok 4.1 Fast (`grok-4-1-fast-non-reasoning`) | See xAI pricing |
-| Budget | Groq | Llama 4 Scout (17Bx16E, 128k, ~594 TPS) | $0.11 in / $0.34 out |
 | Free | Ollama | Local model | Free |
 
 All providers support vision and tool calling. Provider selection is primary-only (no automatic fallback).
@@ -140,14 +134,14 @@ All providers support vision and tool calling. Provider selection is primary-onl
 ## Install
 
 ### Option A: Download ZIP
-1. Go to `https://github.com/KazKozDev/browser-agent-chrome-extension`.
+1. Go to `https://github.com/KazKozDev/browseagent-chrome-extension`.
 2. Click **Code** > **Download ZIP**, extract.
 3. Open `chrome://extensions/`, enable **Developer mode**.
 4. Click **Load unpacked**, select the folder with `manifest.json`.
 
 ### Option B: Clone
 ```bash
-git clone https://github.com/KazKozDev/browser-agent-chrome-extension.git
+git clone https://github.com/KazKozDev/browseagent-chrome-extension.git
 ```
 Then load unpacked in `chrome://extensions/`.
 
@@ -187,10 +181,6 @@ curl https://api.x.ai/v1/chat/completions \
   }'
 ```
 
-### Groq (Budget)
-1. Get API key at `https://console.groq.com/`.
-2. Select the Budget tier. Model: `meta-llama/llama-4-scout-17b-16e-instruct`.
-
 ### Ollama (Free)
 1. Install Ollama, run `ollama serve`.
 2. Pull a model: `ollama pull qwen3-vl:8b`.
@@ -208,8 +198,6 @@ Manifest V3 permissions:
 
 ## Security
 
-- JavaScript tool blocks `document.cookie`, `localStorage`, `sessionStorage`, `indexedDB`, and `Authorization` header access.
-- Per-domain JS approval — agent asks before executing scripts on a new domain.
 - Site blocklist — crypto/payment sites blocked by default; custom domains via Blocklist view.
 - Sensitive action confirmation — `confirm: true` required for submit/delete/pay actions.
 - Login/CAPTCHA detection — agent pauses and waits for manual completion.
@@ -225,7 +213,6 @@ Manifest V3 permissions:
 - **400 tool_use_failed**: invalid tool arguments; retry with correct types.
 - **Agent loops too long**: use a more specific goal; check history metrics for inefficiency.
 - **Login/CAPTCHA**: complete manually, then click Resume.
-- **JS permission prompt**: click **Allow** to continue on that domain, or **Block** to deny scripts.
 
 ## Known Limitations
 
@@ -237,7 +224,7 @@ Manifest V3 permissions:
 ## Support
 
 - Email: `kazkozdev@gmail.com`
-- Issues: `https://github.com/KazKozDev/browser-agent-chrome-extension/issues`
+- Issues: `https://github.com/KazKozDev/browseagent-chrome-extension/issues`
 
 ---
 
