@@ -4,14 +4,14 @@
 
 # BrowseAgent (Beta) — Chrome Extension
 
-[![Release](https://img.shields.io/github/v/release/KazKozDev/browseagent-chrome-extension?label=release)](https://github.com/KazKozDev/browseagent-chrome-extension/releases)
-[![Status](https://img.shields.io/badge/status-Public%20Beta-orange)](https://github.com/KazKozDev/browseagent-chrome-extension/releases/tag/v1.0.2)
+[![Release](https://img.shields.io/github/v/release/KazKozDev/browser-agent-chrome-extension?label=release)](https://github.com/KazKozDev/browser-agent-chrome-extension/releases)
+[![Status](https://img.shields.io/badge/status-Public%20Beta-orange)](https://github.com/KazKozDev/browser-agent-chrome-extension/releases/tag/v1.0.3)
 [![Chrome](https://img.shields.io/badge/chrome-MV3-4285F4?logo=googlechrome&logoColor=white)](https://developer.chrome.com/docs/extensions/develop/migrate/what-is-mv3)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 AI-powered browser automation for Chrome. Give it a goal — it navigates, clicks, reads pages, calls APIs, and reports back.
 
-Latest stable build: **v1.0.2**
+Latest stable build: **v1.0.3**
 
 ## Screenshot
 
@@ -129,19 +129,18 @@ src/
 
 | Tier | Provider | Model | Pricing (per 1M tokens) |
 |---|---|---|---|
-| Recommended | Fireworks | Kimi K2.5 | $0.60 in / $3.00 out |
+| Recommended | Z.AI API | GLM-4.6V (`glm-4.6v`) | See provider rates |
 | Budget | xAI | Grok 4.1 Fast (`grok-4-1-fast-non-reasoning`) | See xAI pricing |
 | Free | Ollama | Local model | Free |
 
 All providers support vision and tool calling. Provider selection is primary-only (no automatic fallback).
-`siliconflow` is implemented in code/config for compatibility, but not shown as a card in the current Settings UI.
 
 ## Install
 
 ### Option A: Download ZIP
 1. Go to `https://github.com/KazKozDev/browser-agent-chrome-extension`.
-2. Download `release/browseagent-v1.0.2-chrome-web-store.zip`:
-   `https://github.com/KazKozDev/browser-agent-chrome-extension/raw/main/release/browseagent-v1.0.2-chrome-web-store.zip`
+2. Download `release/browseagent-v1.0.3-chrome-web-store.zip`:
+   `https://github.com/KazKozDev/browser-agent-chrome-extension/raw/main/release/browseagent-v1.0.3-chrome-web-store.zip`
 3. Extract the archive.
 4. Open `chrome://extensions/`, enable **Developer mode**.
 5. Click **Load unpacked**, select the folder with `manifest.json`.
@@ -160,10 +159,11 @@ Then load unpacked in `chrome://extensions/`.
 
 ## Provider Setup
 
-### Fireworks (Recommended)
-1. Get API key at `https://fireworks.ai/`.
+### Z.AI API (Recommended)
+1. Get API key at `https://z.ai/`.
 2. Select the Recommended tier in Settings.
-3. Model: `accounts/fireworks/models/kimi-k2p5`.
+3. Model: `glm-4.6v`.
+4. API base URL: `https://api.z.ai/api/paas/v4`.
 
 ### xAI (Budget)
 1. Get API key at `https://console.x.ai/`.
@@ -193,9 +193,8 @@ curl https://api.x.ai/v1/chat/completions \
 2. Pull a model: `ollama pull qwen3-vl:8b`.
 3. Select the Free tier in Settings.
 
-### SiliconFlow (Advanced)
-- Provider class exists in code and stored configs are supported.
-- The current Settings UI does not render a SiliconFlow card; setup requires manual config editing in extension storage.
+### Fireworks (Advanced / Optional)
+- Provider class remains available in code/config for compatibility if you already use Fireworks credentials.
 
 ## Permissions
 
@@ -224,7 +223,7 @@ Manifest V3 permissions:
 ## Support
 
 - Email: `kazkozdev@gmail.com`
-- Issues: `https://github.com/KazKozDev/browseagent-chrome-extension/issues`
+- Issues: `https://github.com/KazKozDev/browser-agent-chrome-extension/issues`
 
 ---
 

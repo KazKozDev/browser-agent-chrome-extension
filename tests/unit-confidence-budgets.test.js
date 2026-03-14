@@ -332,6 +332,37 @@ test('maybeAutoCompleteFromEvidence returns complete when facts are sufficient u
   assert.match(String(out.answer || ''), /WhatsApp/i);
 });
 
+test('maybeAutoCompleteFromEvidence allows completion with residual unknowns under duplicate-loop pressure when direct answer exists', () => {
+  const agent = makeAgent();
+  agent._goal = 'курс евро';
+  agent._isNavigateOnly = true;
+  agent._checkPrematureDone = () => ({ ok: true });
+  agent._validateDoneQuality = () => ({ ok: true });
+  agent._validateDoneCoverage = () => ({ ok: true });
+  agent._noProgressStreak = 6;
+  agent._dupCount = 2;
+  const out = agent._maybeAutoCompleteFromEvidence(
+    {
+      sufficiency: false,
+      confidence: 0.56,
+      facts: [
+        'Официальный курс EUR: 90,7307 RUB (ЦБ РФ, с 03.03.2026).',
+      ],
+      unknowns: ['Live market buy/sell rates from banks'],
+      summary: 'По данным ЦБ РФ курс EUR = 90,7307 RUB.',
+      answer: 'Официальный курс евро по ЦБ РФ: 90,7307 RUB (установлен с 03.03.2026).',
+      actions: [{ tool: 'get_page_text', args: {} }],
+    },
+    { remaining: 6, total: 20 },
+    10,
+  );
+
+  assert.ok(out);
+  assert.equal(out.success, true);
+  assert.equal(out.status, 'complete');
+  assert.match(String(out.answer || ''), /90,7307/i);
+});
+
 test('pauseForHumanGuidance pauses and resumes agent loop', async () => {
   const agent = makeAgent();
   agent.status = 'running';

@@ -78,3 +78,39 @@ test('repeated completion rejection forces evidence action to break reflection-o
   assert.equal(second.handled, true);
   assert.equal(forcedCalls, 1);
 });
+
+test('done is rejected while post-action verification is still pending', async () => {
+  const agent = makeAgent();
+  agent._pendingVerification = {
+    step: 2,
+    tool: 'computer',
+    action: 'click',
+    actionLabel: 'click',
+    expectedOutcome: 'the clicked control should change the page state',
+  };
+
+  const verification = agent._validateDoneVerification();
+  assert.equal(verification.ok, false);
+  assert.match(verification.reason, /not verified yet/i);
+});
+
+test('successful observation clears pending verification', () => {
+  const agent = makeAgent();
+  agent._pendingVerification = {
+    step: 2,
+    tool: 'computer',
+    action: 'click',
+    actionLabel: 'click',
+    expectedOutcome: 'the clicked control should change the page state',
+  };
+
+  agent._updatePendingVerificationAfterAction(
+    3,
+    'read_page',
+    {},
+    {},
+    { success: true, url: 'https://example.com', tree: {} },
+  );
+
+  assert.equal(agent._pendingVerification, null);
+});

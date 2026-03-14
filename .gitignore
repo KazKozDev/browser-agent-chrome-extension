@@ -15,7 +15,10 @@ yarn-error.log*
 dist/
 build/
 coverage/
-release/
+release/*
+!release/*.zip
+!release/*-package/
+!release/*-package/**
 _metadata/
 
 # Dependencies

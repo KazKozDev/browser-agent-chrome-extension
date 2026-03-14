@@ -48,10 +48,13 @@ test('normalizeReflectionState supports actions[] and caps batch size', () => {
   assert.ok(Array.isArray(normalized.state.actions));
   assert.equal(normalized.state.actions.length, 4);
   assert.equal(normalized.state.actions[0].tool, 'read_page');
-  assert.deepEqual(normalized.state.next_action, normalized.state.actions[0]);
+  // next_action is deprecated — actions[0] is the canonical first action
+  assert.equal(normalized.state.actions[0].tool, 'read_page');
 });
 
-test('normalizeReflectionState keeps backward compatibility with next_action', () => {
+test('normalizeReflectionState handles legacy next_action field gracefully', () => {
+  // next_action is deprecated; when only next_action is provided (no actions[]),
+  // the agent synthesizes a fallback action from context rather than using next_action directly.
   const agent = makeAgent();
   const raw = {
     facts: [],
@@ -63,10 +66,11 @@ test('normalizeReflectionState keeps backward compatibility with next_action', (
     answer: '',
     next_action: { tool: 'read_page', args: {} },
   };
-  const normalized = agent._normalizeReflectionState(raw, [{ name: 'read_page' }], { total: 50, used: 0, remaining: 50 });
+  const normalized = agent._normalizeReflectionState(raw, [{ name: 'read_page' }, { name: 'get_page_text' }], { total: 50, used: 0, remaining: 50 });
   assert.equal(normalized.ok, true);
   assert.ok(Array.isArray(normalized.state.actions));
-  assert.equal(normalized.state.actions.length, 1);
-  assert.equal(normalized.state.actions[0].tool, 'read_page');
-  assert.equal(normalized.state.next_action.tool, 'read_page');
+  // The agent synthesizes a fallback action (get_page_text or read_page) when no actions[] provided
+  assert.ok(normalized.state.actions.length >= 1);
+  // next_action field is no longer present in the state
+  assert.equal(normalized.state.next_action, undefined);
 });
