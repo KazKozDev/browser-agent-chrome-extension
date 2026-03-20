@@ -9,9 +9,11 @@
 [![Chrome](https://img.shields.io/badge/chrome-MV3-4285F4?logo=googlechrome&logoColor=white)](https://developer.chrome.com/docs/extensions/develop/migrate/what-is-mv3)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-AI-powered browser automation in a Chrome side panel. Describe a goal in plain English, and BrowseAgent can navigate, read pages, fill forms, call APIs, and send results to external tools.
+AI-powered browser automation in a Chrome side panel. Describe a goal in plain English — BrowseAgent navigates, reads pages, fills forms, calls APIs and routes results to external tools.
 
 Latest stable build: **v1.0.3**
+
+---
 
 ## Table of Contents
 
@@ -21,42 +23,39 @@ Latest stable build: **v1.0.3**
 - [Screenshot](#screenshot)
 - [What It Can Do](#what-it-can-do)
 - [Example Scenarios](#example-scenarios)
-- [Architecture Overview](#architecture-overview)
+- [Architecture](#architecture)
 - [Tech Stack](#tech-stack)
 - [Repository Structure](#repository-structure)
 - [Quick Start](#quick-start)
-- [Provider Setup](#provider-setup)
-- [Testing and Code Quality](#testing-and-code-quality)
-- [Security and Privacy](#security-and-privacy)
-- [Project Status and Roadmap](#project-status-and-roadmap)
+- [Project Status](#project-status)
 - [Contributing](#contributing)
-- [License](#license)
-- [Author and Contact](#author-and-contact)
+- [License and Contact](#license-and-contact)
+
+---
 
 ## Highlights
 
 - AI browser agent for real Chrome workflows, not just demos.
 - Tool-based execution: navigate, inspect DOM, click, type, extract data, call APIs.
-- Human-in-the-loop controls with **Plan mode** and sensitive-action checks.
-- Background runs, scheduled tasks, recovery, notifications and connector routing.
+- Human-in-the-loop controls with **Plan mode** and sensitive-action confirmation.
+- Background runs, scheduled tasks, session recovery and connector routing.
 - Chrome MV3 architecture with automated tests and release-ready packaging.
 
 ## Overview
 
-BrowseAgent is a Chrome extension for delegating browser work to an LLM-backed agent. Instead of writing scripts or relying on brittle record-and-replay flows, the user describes a goal and the extension executes it through explicit browser tools.
+BrowseAgent is a Chrome extension for delegating browser work to an LLM-backed agent. Instead of writing scripts or relying on brittle record-and-replay flows, you describe a goal and the extension executes it through explicit, auditable browser tools.
 
-It is designed for people who need more flexibility than macros and more control than a hosted browser agent: operators, growth teams, researchers and engineers exploring agentic UX directly inside the browser.
+Designed for operators, growth teams, researchers and engineers who need more flexibility than macros and more control than a hosted cloud agent — with execution staying entirely inside your browser.
 
 ## Why I Built It
 
-BrowseAgent started as an experiment in applying generative AI to practical browser automation. The goal was not to "chat with a page", but to build an agent that can operate inside Chrome with clear tools, controlled permissions and workflow features that make it usable beyond a toy demo.
+BrowseAgent started as an experiment in applying generative AI to practical browser automation. The goal was not to "chat with a page", but to build an agent that operates inside Chrome with clear tools, controlled permissions and workflow features that make it usable beyond a toy demo.
 
-Compared with traditional automation, it is optimized for natural-language tasks and adaptation at runtime. Compared with fully hosted agents, it keeps execution close to the browser, which is useful for DOM interaction, tab management, manual approvals and local/private provider options such as Ollama.
+Compared with traditional automation it adapts at runtime to natural-language goals. Compared with fully hosted agents it keeps execution close to the browser — useful for DOM interaction, manual approvals and local/private providers such as Ollama.
 
 ## Screenshot
 
-**Query:**  
-"Open Wikipedia and find the article about Albert Einstein."
+**Query:** "Open Wikipedia and find the article about Albert Einstein."
 
 ![BrowseAgent screenshot](docs/images/screen.png)
 
@@ -64,41 +63,26 @@ Compared with traditional automation, it is optimized for natural-language tasks
 
 ## What It Can Do
 
-### Core capabilities
+- **Navigate** — pages, history, tabs, iframes, back/forward.
+- **Read** — accessibility tree, page text, structured data extracted from lists or cards.
+- **Interact** — click, type, select, hover, scroll, keyboard shortcuts, form filling.
+- **Integrate** — call external APIs; route outputs to Slack, Notion, Airtable, Discord or any webhook.
+- **Plan** — preview and approve execution steps before the agent acts.
+- **Schedule** — recurring background tasks via `chrome.alarms`; sessions persist across panel restarts.
+- **Guard** — site blocklist, sensitive-action confirmation, anti-loop and token-budget limits.
 
-- Navigate across pages, browser history, tabs and iframes.
-- Read pages with accessibility-tree and text extraction tools.
-- Interact with forms and controls via click, type, select, hover, scroll and keyboard input.
-- Extract structured data from repeated result lists or cards.
-- Call external APIs and route outputs to connectors such as Slack, Notion, Airtable or webhooks.
-
-### Workflow features
-
-- **Plan mode** for preview and approval before execution.
-- **Scheduled tasks** powered by `chrome.alarms`.
-- **Background execution** that continues after the side panel closes.
-- **Recoverable sessions** with persisted checkpoints and replayed state.
-- **Notifications and history** with task metrics.
-
-### Safety and resilience
-
-- Site blocklist with network-level enforcement.
-- Optional tracker and ad blocker during runs.
-- Login, CAPTCHA and sensitive-action detection.
-- Duplicate-action, SERP-loop and token-budget guards.
-
-The full tool catalog is documented in [docs/TOOLS.md](docs/TOOLS.md).
+Full tool catalog → [docs/TOOLS.md](docs/TOOLS.md)
 
 ## Example Scenarios
 
-- Research assistant: open a target site, search for a topic, read results and summarize findings.
-- Browser ops: navigate a dashboard, collect values and send them to Slack, Airtable or a webhook.
-- Human-supervised automation: generate a plan first, approve it, then let the extension execute routine steps.
-- Scheduled monitoring: run recurring checks in the background and notify the user on completion.
+- **Research assistant** — search a topic across pages, read results, return a summary.
+- **Browser ops** — collect dashboard values and send them to Slack, Airtable or a webhook.
+- **Supervised automation** — generate a plan, approve it, then let the agent handle the steps.
+- **Scheduled monitoring** — run recurring background checks and notify on completion.
 
-## Architecture Overview
+## Architecture
 
-BrowseAgent uses a Chrome Extension Manifest V3 layout with a service worker for orchestration, content scripts for DOM access and a side-panel UI for task control.
+Manifest V3 layout: a **service worker** orchestrates task lifecycle; **content scripts** access the DOM; the **side-panel UI** handles task control and history.
 
 ```mermaid
 sequenceDiagram
@@ -124,183 +108,90 @@ sequenceDiagram
     Panel-->>User: Output, approval, history
 ```
 
-### Main design decisions
-
-- **Service worker orchestration:** task lifecycle, alarms, recovery and background execution live in `src/background/`.
-- **Content-script execution:** DOM reading and interaction stay in `src/content/`, close to the page context.
-- **Provider abstraction:** LLM providers are isolated behind a common interface in `src/providers/`.
-- **Tool-based agent loop:** the agent operates through explicit browser and integration tools rather than arbitrary page code execution.
+Key decisions: provider abstraction isolates LLM backends behind a common interface for easy swapping; no build step means you can load unpacked, inspect and iterate without a bundler.
 
 ## Tech Stack
 
 | Area | Technology |
 |---|---|
 | Extension platform | Chrome Extension APIs, Manifest V3 |
-| Language/runtime | JavaScript (ES modules) |
+| Language | JavaScript (ES modules), no build step |
 | UI shell | Chrome Side Panel |
-| Browser orchestration | `chrome.tabs`, `chrome.scripting`, `chrome.alarms`, `chrome.storage`, `chrome.declarativeNetRequest`, `chrome.notifications` |
-| Agent interface | JSON-schema tool definitions |
-| Model providers | Z.AI API, xAI, Ollama, Fireworks compatibility layer |
-| Integrations | Slack, Discord, Notion, Airtable, Google Sheets webhook, email/webhook endpoints |
+| Browser APIs | `chrome.tabs`, `chrome.scripting`, `chrome.alarms`, `chrome.storage`, `chrome.declarativeNetRequest` |
+| Model providers | Z.AI, xAI (Grok), Ollama — OpenAI-compatible interface |
+| Integrations | Slack, Discord, Notion, Airtable, Google Sheets, email, custom webhook |
 | Testing | Node built-in test runner (`node --test`) |
-
-### Why these choices
-
-- **Manifest V3** keeps the project aligned with the current Chrome extension model.
-- **Service worker + content script split** maps cleanly to Chrome's security boundaries.
-- **OpenAI-compatible provider pattern** makes it easier to swap hosted and local LLM backends.
-- **No build step** keeps the extension easy to inspect, load unpacked and iterate on.
 
 ## Repository Structure
 
 ```text
 src/
-├── agent/               Agent loop, reflection, state, safety and completion logic
-├── background/          Service worker, orchestration, alarms, routing, recovery
-├── config/              Limits, defaults and shared constants
-├── content/             DOM reading, page actions, console/network monitoring
-├── integrations/        Delivery adapters for external services
-├── providers/           LLM provider implementations and manager
-├── rules/               Declarative Net Request rulesets
-├── sidepanel/           UI for Task, Queue, History, Skills, Connections, Settings
-└── tools/               Tool schemas exposed to the model
+├── agent/          Agent loop, reflection, state, safety, completion
+├── background/     Service worker, orchestration, alarms, recovery
+├── config/         Limits, defaults, shared constants
+├── content/        DOM reading, page actions, console/network monitoring
+├── integrations/   Delivery adapters for external services
+├── providers/      LLM provider implementations and manager
+├── sidepanel/      UI: Task, Queue, History, Skills, Connections, Settings
+└── tools/          Tool schemas exposed to the model
 
 docs/
-├── E2E_CHECKLIST.md     Manual release checklist
-└── TOOLS.md             Full tool reference
+├── TOOLS.md             Full tool reference
+├── PROVIDERS.md         Provider setup and model selection guide
+└── E2E_CHECKLIST.md     Manual release checklist
 
-tests/
-├── unit-*.test.js       Agent heuristics, safety, planning and state tests
-├── integration-*.test.js Integration behavior tests
-└── e2e-*.test.js        Automated end-to-end regression tests
+tests/                   Unit, integration and E2E test suites
 ```
 
 ## Quick Start
 
-### Requirements
+**Requirements:** Chrome 114+, one LLM API key (Z.AI or xAI) or a local [Ollama](https://ollama.com/) instance.
 
-- Chrome **114+**
-- One configured LLM provider:
-  - Hosted API key for Z.AI or xAI, or
-  - Local Ollama instance
+```bash
+git clone https://github.com/KazKozDev/browser-agent-chrome-extension.git
+```
 
-### Install for evaluation
+Or [download the latest ZIP](https://github.com/KazKozDev/browser-agent-chrome-extension/raw/main/release/browseagent-v1.0.3-chrome-web-store.zip) and extract it.
 
-1. Clone the repository:
+1. Go to `chrome://extensions/` → enable **Developer mode** → **Load unpacked** → select `browseagent-ext/`.
+2. Open the extension side panel.
+3. In **Settings**, choose a provider, enter credentials and click **Test**.
+4. Enter a goal in the **Task** view and run it.
 
-   ```bash
-   git clone https://github.com/KazKozDev/browser-agent-chrome-extension.git
-   ```
+Provider setup details (Z.AI, xAI, Ollama) → [docs/PROVIDERS.md](docs/PROVIDERS.md)
 
-2. Open `chrome://extensions/`.
-3. Enable **Developer mode**.
-4. Click **Load unpacked**.
-5. Select the `browseagent-ext/` folder.
-6. Open the extension side panel.
-7. In **Settings**, choose a provider, enter credentials, and click **Test**.
-8. Enter a goal in the task view and run it.
-
-### Install from release ZIP
-
-1. Download [`browseagent-v1.0.3-chrome-web-store.zip`](https://github.com/KazKozDev/browser-agent-chrome-extension/raw/main/release/browseagent-v1.0.3-chrome-web-store.zip).
-2. Extract the archive.
-3. Load the unpacked folder in `chrome://extensions/`.
-
-## Provider Setup
-
-### Recommended: Z.AI API
-
-1. Get an API key at [z.ai](https://z.ai/).
-2. In Settings, choose the recommended tier.
-3. Use model `glm-4.6v`.
-4. Set base URL to `https://api.z.ai/api/paas/v4`.
-
-### Budget: xAI
-
-1. Get an API key at [console.x.ai](https://console.x.ai/).
-2. Choose the budget tier.
-3. Use model `grok-4-1-fast-non-reasoning`.
-4. Set base URL to `https://api.x.ai/v1`.
-
-### Free / local: Ollama
-
-1. Install Ollama and run `ollama serve`.
-2. Pull a model such as `ollama pull qwen3-vl:8b`.
-3. Choose the free tier in Settings.
-
-### Advanced / optional: Fireworks
-
-Fireworks remains available in code/config for compatibility with existing setups.
-
-## Testing and Code Quality
-
-BrowseAgent includes automated tests plus a manual release checklist.
-
-### Run automated tests
+### Run tests
 
 ```bash
 npm test
 ```
 
-### Quality signals in the repository
+Suites cover planning heuristics, safety guards, anti-loop behavior and completion checks. Manual release checklist: [docs/E2E_CHECKLIST.md](docs/E2E_CHECKLIST.md).
 
-- Unit tests for planning, anti-looping, history summaries, snapshots and safety behaviors.
-- Integration tests for navigation tools, completion guards and blocked fallbacks.
-- Automated E2E coverage for step limits and done-quality checks.
-- Manual release verification in [docs/E2E_CHECKLIST.md](docs/E2E_CHECKLIST.md).
+## Project Status
 
-## Security and Privacy
+**Public Beta — v1.0.3**
 
-### Security
+Known limitations: cross-origin iframe control, anti-bot pages, dynamic element IDs after re-render, Ollama performance tied to local hardware.
 
-- Site blocklist with default protection for sensitive domains.
-- Sensitive-action confirmation for destructive or payment-like flows.
-- `http_request` guardrails for schemes, private-network access and credentials in URLs.
-- Optional tracker blocking for cleaner, lower-noise pages during runs.
-
-### Privacy
-
-- Privacy policy: [PRIVACY.md](PRIVACY.md)
-- Local-provider option via Ollama for privacy-sensitive experimentation.
-
-## Project Status and Roadmap
-
-**Status:** Public Beta
-
-Current limitations:
-
-- Some cross-origin iframes cannot be controlled due to browser security boundaries.
-- Anti-bot and heavily protected pages may block automation.
-- Dynamic pages can invalidate cached element IDs after re-render.
-- Ollama performance depends on local hardware and chosen model size.
-
-Near-term improvements:
-
-- Broader provider coverage and setup UX polish.
-- More guided workflow templates and example tasks.
-- Better observability around long-running and scheduled jobs.
+Roadmap:
+- Broader provider coverage and onboarding UX polish.
+- Guided workflow templates and example task library.
+- Better observability for scheduled and long-running jobs.
 - Continued hardening of task recovery and anti-loop behavior.
 
 ## Contributing
 
-Contributions, bug reports and workflow ideas are welcome.
+Bug reports, workflow ideas and pull requests are welcome.
 
-1. Open an issue describing the bug, use case or proposed change.
-2. Fork the repository and create a focused branch.
-3. Add or update tests when behavior changes.
-4. Submit a pull request with a concise explanation of the change and rationale.
+1. Open an issue describing the problem or proposal (include the user problem, not just the implementation idea).
+2. Fork, create a focused branch, add or update tests where behavior changes.
+3. Submit a pull request with a clear explanation and rationale.
 
-For larger product ideas, include the user problem and expected workflow, not just the implementation detail.
+## License and Contact
 
-## License
+MIT License — see [LICENSE](LICENSE) · Privacy policy — see [PRIVACY.md](PRIVACY.md)
 
-This project is released under the [MIT License](LICENSE).
+**Author:** [KazKozDev](https://github.com/KazKozDev) · [LinkedIn](https://www.linkedin.com/in/kazkozdev/) · kazkozdev@gmail.com · [Issues](https://github.com/KazKozDev/browser-agent-chrome-extension/issues)
 
-## Author and Contact
-
-- GitHub: [KazKozDev](https://github.com/KazKozDev)
-- LinkedIn: [Artem KK](https://www.linkedin.com/in/kazkozdev/)
-- Email: `kazkozdev@gmail.com`
-- Issues: [GitHub Issues](https://github.com/KazKozDev/browser-agent-chrome-extension/issues)
-
-If this project is useful, a GitHub star helps more people find it.
+If this project is useful, a ⭐ on GitHub helps more people find it.
