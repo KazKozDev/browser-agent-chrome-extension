@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Privacy Policy — BrowseAgent</title>
+    <meta name="description"
+        content="BrowseAgent privacy policy. We do not collect, store, or transmit your personal data.">
+    <link rel="icon" type="image/png" href="assets/icon.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet"
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap">
+    <link rel="stylesheet" href="style.css">
+    <style>
+        .privacy {
+            padding: 120px 0 80px;
+            max-width: 680px;
+        }
+
+        .privacy h1 {
+            font-size: clamp(22px, 3vw, 32px);
+            font-weight: 700;
+            margin-bottom: 32px;
+            letter-spacing: -0.02em;
+        }
+
+        .privacy h2 {
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            color: var(--gold);
+            margin: 36px 0 10px;
+        }
+
+        .privacy p,
+        .privacy li {
+            color: var(--text-secondary);
+            font-size: 14px;
+            line-height: 1.7;
+            margin-bottom: 10px;
+        }
+
+        .privacy ul {
+            padding-left: 20px;
+            margin-bottom: 12px;
+        }
+
+        .privacy a {
+            color: var(--gold);
+            text-decoration: underline;
+        }
+
+        .privacy__back {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 10px;
+            font-weight: 600;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            color: var(--text-muted);
+            margin-bottom: 36px;
+            transition: var(--transition);
+        }
+
+        .privacy__back:hover {
+            color: var(--text-secondary);
+        }
+    </style>
+</head>
+
+<body>
+    <div class="bg-grid" aria-hidden="true"></div>
+
+    <nav class="nav nav--scrolled" id="nav">
+        <div class="nav__inner">
+            <a href="index.html" class="nav__logo">
+                <img src="assets/icon.png" alt="BrowseAgent" width="32" height="32" class="nav__logo-img">
+                <span class="nav__logo-text">BrowseAgent</span>
+            </a>
+            <a href="index.html" class="btn btn--ghost btn--sm">Back to Home</a>
+        </div>
+    </nav>
+
+    <main class="privacy container">
+        <a href="index.html" class="privacy__back">&larr; Back to Home</a>
+        <h1>Privacy Policy</h1>
+
+        <h2>Overview</h2>
+        <p>BrowseAgent is a browser extension that runs entirely in your browser. We do not operate any servers, and we
+            do not collect, store, or transmit your personal data.</p>
+
+        <h2>Data Collection</h2>
+        <p>BrowseAgent does <strong>not</strong> collect:</p>
+        <ul>
+            <li>Personal information</li>
+            <li>Browsing history</li>
+            <li>Page contents</li>
+            <li>Screenshots</li>
+            <li>API keys</li>
+            <li>Task inputs or outputs</li>
+        </ul>
+
+        <h2>LLM API Communication</h2>
+        <p>When you use BrowseAgent, your task instructions and page context are sent directly from your browser to the
+            LLM provider you configure (e.g., Fireworks AI, xAI, Ollama). This communication happens directly between
+            your browser and the provider's API — no data passes through any BrowseAgent server.</p>
+
+        <h2>Local Storage</h2>
+        <p>BrowseAgent stores settings, task history, and API keys locally in your browser using Chrome's built-in
+            storage APIs. This data never leaves your device.</p>
+
+        <h2>Third-Party Services</h2>
+        <p>When you configure integrations (Telegram, Slack, etc.), data is sent directly from your browser to those
+            services. BrowseAgent acts only as the local automation layer.</p>
+
+        <h2>Open Source</h2>
+        <p>BrowseAgent is open source. You can inspect the full source code to verify these privacy claims.</p>
+
+        <h2>Contact</h2>
+        <p>For privacy questions, open an issue on our <a href="https://github.com" target="_blank"
+                rel="noopener">GitHub repository</a>.</p>
+    </main>
+
+    <footer class="footer">
+        <div class="container">
+            <div class="footer__inner">
+                <div class="footer__left">
+                    <p class="footer__copy">&copy; 2025 BrowseAgent. Open Source under MIT License.</p>
+                </div>
+            </div>
+        </div>
+    </footer>
+</body>
+
+</html>
