@@ -830,9 +830,11 @@ img {
 
 .workflow-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 24px;
+  grid-template-columns: 1fr;
+  gap: 28px;
   align-items: start;
+  max-width: 900px;
+  margin: 0 auto;
 }
 
 .workflow-card {
