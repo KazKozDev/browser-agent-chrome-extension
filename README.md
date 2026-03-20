@@ -146,22 +146,11 @@ npm test
 - Add or update tests when behavior changes
 - Submit a pull request with a clear before/after explanation
 
-## License
-
 MIT - see [LICENSE](LICENSE)
-
-## Contact
-
-- GitHub: [KazKozDev](https://github.com/KazKozDev)
-- LinkedIn: [kazkozdev](https://www.linkedin.com/in/kazkozdev/)
-- Email: `kazkozdev@gmail.com`
-- Privacy: [PRIVACY.md](PRIVACY.md)
 
 If you like this project, please give it a star ⭐
 
 For questions, feedback, or support, reach out to:
 
-Artem KK | MIT LICENSE
-GitHub: https://github.com/KazKozDev
-LinkedIn: https://www.linkedin.com/in/kazkozdev/
-Email: kazkozdev@gmail.com
+[LinkedIn](https://www.linkedin.com/in/kazkozdev/)
+[Email](mailto:kazkozdev@gmail.com)
