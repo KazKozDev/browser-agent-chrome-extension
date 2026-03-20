@@ -146,6 +146,8 @@ npm test
 - Add or update tests when behavior changes
 - Submit a pull request with a clear before/after explanation
 
+---
+
 MIT - see [LICENSE](LICENSE)
 
 If you like this project, please give it a star ⭐
