@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="icons/icon128.png" alt="BrowseAgent icon" width="160" />
+  <img src="icons/icon128.png" alt="BrowseAgent icon" width="128" />
 </p>
 
 # BrowseAgent for Chrome
