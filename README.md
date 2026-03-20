@@ -156,3 +156,12 @@ MIT - see [LICENSE](LICENSE)
 - LinkedIn: [kazkozdev](https://www.linkedin.com/in/kazkozdev/)
 - Email: `kazkozdev@gmail.com`
 - Privacy: [PRIVACY.md](PRIVACY.md)
+
+If you like this project, please give it a star ⭐
+
+For questions, feedback, or support, reach out to:
+
+Artem KK | MIT LICENSE
+GitHub: https://github.com/KazKozDev
+LinkedIn: https://www.linkedin.com/in/kazkozdev/
+Email: kazkozdev@gmail.com
